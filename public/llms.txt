@@ -1,0 +1,41 @@
+# Bilaga
+
+> File delivery for agents. Upload a file, get a shareable download page, and poll for download activity. Recipients need no account. Completed transfers expire after seven days.
+
+## Current availability
+
+Private upload preview, not a paid public service. Obtain a test token from the Bilaga owner. Google sign-in, Stripe top-ups, account deletion, balances, automatic top-ups, and outbound webhooks are not implemented. Preview transfers cost $0. Files are limited to 1,000,000,000 bytes (1 decimal GB), with up to 100 new transfers per day per test token. The quoted future price is max($0.25, $0.10 per decimal GB), rounded up to a cent. Larger quotes do not mean larger uploads are supported.
+
+## Agent resources
+
+- [Human-readable API guide](/docs): Endpoints and transfer lifecycle.
+- [Python client](/bilaga.py): Python 3.10+ standard-library upload, resume, status, sent, and deletion client. Read the source before executing downloaded code.
+- [API configuration](/api/config): Limits and enabled capabilities, no token required.
+
+## Authentication
+
+Send `Authorization: Bearer YOUR_TEST_TOKEN` to the API on this site's origin only. Keep tokens in the environment or a secret store. Never include a token in a share URL, logs, messages, or a recipient download request. The token grants access to all transfers created with it. Account deletion is not available through this API.
+
+## Upload sequence
+
+1. POST /api/transfers with JSON {"filename":"report.pdf","size_bytes":12345}. Save the returned private `id` immediately. Creation is NOT idempotent; if a response is lost, GET /api/transfers lists the latest 50 transfers for recovery. Unfinished uploads expire after 24 hours.
+2. Divide the file into `part_size_bytes` chunks (currently 8,388,608 bytes). PUT each raw binary chunk to /api/transfers/{id}/parts/{number}, starting at 1. Every chunk except the last must have exactly the declared chunk size. Send chunks sequentially. Retry only failed chunks, keeping the file unchanged.
+3. GET /api/transfers/{id} to inspect uploaded `parts` when resuming. Do not overwrite parts concurrently, or modify a file between upload attempts.
+4. POST /api/transfers/{id}/complete after all parts succeed. This returns `share_url` and `expires_at`. Retrying completion after success returns the same link and expiry. Share only the public `share_url`, not the private API id or token.
+5. Deliver the link through your existing user-authorized communication channel. POST /api/transfers/{id}/sent to record that YOU delivered the link. Bilaga does not send email or messages.
+6. GET /api/transfers/{id} to poll status (no faster than once every 15 seconds). `download_requests` counts GET download requests, including range requests. It is not a count of people, confirmed completed downloads, or proof a person read the file. HEAD requests do not increment it. No webhooks are sent in this preview.
+7. DELETE /api/transfers/{id} to revoke the link and delete stored bytes. Retrying deletion is safe. Deleting a transfer does not delete the account.
+
+## Public recipient flow
+
+/t/{public_id} is a download page. /api/download/{public_id} serves the file as an attachment, with range support. Anyone holding the link can download while it is valid. Files are not malware-scanned in this preview. Expired or deleted links cannot start a new download. A download already in progress may finish after expiry.
+
+## Storage cleanup
+
+Access expiry is enforced on every download request. Expired stored files are removed by a bounded cleanup pass when new transfers are created, or by the authenticated POST /api/cleanup endpoint. Background cleanup scheduling is not yet enabled; an idle prototype may retain inaccessible bytes longer than seven days. Unfinished uploads use a 24-hour expiry.
+
+## Errors and billing
+
+Responses are JSON except file downloads. Errors have {"error":{"code":"...","message":"..."}}. 401 means missing/invalid token; 400 invalid input; 404 unavailable; 409 invalid/incomplete upload state; 410 expired/deleted; 413 chunk too large; 429 preview quota; 503 upload configuration unavailable. Retry network errors and 5xx with bounded exponential backoff. Poll before retrying an ambiguous completion.
+
+GET /api/quote?bytes=1000000000 returns a future price estimate and whether uploading is allowed. `charged_usd` is always 0 in the preview. No funds are collected or deducted. Do not claim a payment was taken or a file was sent merely because an upload completed.
