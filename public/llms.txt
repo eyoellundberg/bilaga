@@ -14,7 +14,7 @@ Private upload preview, not a paid public service. Obtain a test token from the 
 
 ## Authentication
 
-Send `Authorization: Bearer YOUR_TEST_TOKEN` to the API on this site's origin only. Keep tokens in the environment or a secret store. Never include a token in a share URL, logs, messages, or a recipient download request. The token grants access to all transfers created with it. Account deletion is not available through this API.
+Send `Authorization: Bearer YOUR_TEST_TOKEN` to the API on this site's origin only. Identify your client with `User-Agent: Bilaga-Client/0.1` (or your own descriptive client name); the temporary host rejects Python's default user agent. Keep tokens in the environment or a secret store. Never include a token in a share URL, logs, messages, or a recipient download request. The token grants access to all transfers created with it. Account deletion is not available through this API.
 
 ## Upload sequence
 

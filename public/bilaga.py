@@ -36,7 +36,7 @@ opener=build_opener(NoRedirect)
 
 def api(path, method='GET', data=None, retry=False):
     payload=json.dumps(data).encode() if isinstance(data,dict) else data
-    headers={'Authorization':'Bearer '+token,'Content-Type':'application/json' if isinstance(data,dict) else 'application/octet-stream'}
+    headers={'User-Agent':'Bilaga-Client/0.1','Accept':'application/json','Authorization':'Bearer '+token,'Content-Type':'application/json' if isinstance(data,dict) else 'application/octet-stream'}
     for attempt in range(3 if retry else 1):
         try:
             with opener.open(Request(origin+'/api/'+path,data=payload,headers=headers,method=method),timeout=120) as res:

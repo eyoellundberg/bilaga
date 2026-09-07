@@ -26,7 +26,7 @@ A completed upload becomes available for seven days. Downloads check expiry and 
 
 Status is polled. Download GETs (including range requests) are counted as requests, not confirmed completed downloads or unique recipients. HEAD requests do not count. “Sent” is a report from the delivering agent. No email service or outgoing webhook is required for this prototype.
 
-A feature-detected WebMCP tool refreshes the currently displayed transfer. The HTTP API was tested end to end; WebMCP runtime registration was not verified because no supported validation context was established. WebMCP is optional and is not required by the Python client.
+A feature-detected WebMCP tool refreshes the currently displayed transfer. The HTTP API was tested end to end locally and with a live agent transfer. WebMCP registration was observed in the live browser, but valid tool execution was not verified because the browser upload test was not authorized. WebMCP is optional and is not required by the Python client.
 
 ## Next session
 
