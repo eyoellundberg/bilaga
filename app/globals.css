@@ -1,6 +1,10 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source(none);
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+@source './';
+@source '../components/ui/button.tsx';
+@source '../components/ui/input.tsx';
+@source '../components/ui/progress.tsx';
 @theme inline {
  --color-background:var(--background);--color-foreground:var(--foreground);--color-primary:var(--primary);--color-primary-foreground:var(--primary-foreground);--color-muted:var(--muted);--color-muted-foreground:var(--muted-foreground);--color-border:var(--border);--color-ring:var(--ring);--color-input:var(--border);--color-destructive:#a12734;--color-secondary:var(--muted);--color-secondary-foreground:var(--foreground);--color-accent:var(--muted);--color-accent-foreground:var(--foreground);--radius-lg:12px;--radius-md:8px;--font-sans:Arial,Helvetica,sans-serif;--font-mono:'SFMono-Regular',Consolas,monospace;
 }

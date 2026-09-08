@@ -44,7 +44,7 @@ def api(path, method='GET', data=None, retry=False):
         except HTTPError as e:
             message=e.read().decode('utf-8',errors='replace')
             if retry and (e.code>=500 or e.code==429) and attempt<2:
-                time.sleep(2**attempt);continue
+                time.sleep(min(60,max(1,int(e.headers.get('Retry-After','1')))) if e.code==429 else 2**attempt);continue
             raise RuntimeError(f'Bilaga returned {e.code}: {message}') from None
         except (URLError,TimeoutError) as e:
             if retry and attempt<2:

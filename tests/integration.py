@@ -64,4 +64,5 @@ def main():
     for page in ['/','/docs','/llms.txt','/bilaga.py']:request(page,auth=False)
     print(f'{checks} HTTP checks passed: multipart bytes, retries, authentication, completion, download ranges, status, deletion, expiry, cleanup, and documentation.')
 
-main()
+if __name__=='__main__':
+    main()

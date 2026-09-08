@@ -8,6 +8,13 @@
       "when": 1788796972130,
       "tag": "0000_bright_steel_serpent",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788798744058,
+      "tag": "0001_shiny_prowler",
+      "breakpoints": true
     }
   ]
 }

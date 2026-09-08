@@ -10,7 +10,7 @@ This checkout is a Sites project using a Cloudflare Worker, a managed D1 databas
 
 Use Node 22.13+ and `npm ci`. Copy `.env.example` to `.env`, set `BILAGA_TOKEN_HASH` to the SHA-256 hex digest of a strong private test token, and keep the raw token outside source control. The initial local token is in the ignored `.bilaga-token` file with owner-only file permissions.
 
-Apply the generated schema with `npx wrangler d1 execute DB --local --config wrangler.local.json --persist-to .wrangler/state --file drizzle/0000_bright_steel_serpent.sql`, then run `npm run dev -- --port 3119 --strictPort`. Use `WRANGLER_LOG_PATH=.wrangler/logs` if your environment restricts global log writes.
+Apply the generated schema with `npx wrangler d1 execute DB --local --config wrangler.local.json --persist-to .wrangler/state --file drizzle/0000_bright_steel_serpent.sql`, apply `drizzle/0001_shiny_prowler.sql` with the same command, then run `npm run dev -- --port 3119 --strictPort`. Use `WRANGLER_LOG_PATH=.wrangler/logs` if your environment restricts global log writes.
 
 `python3 tests/integration.py` exercises the local server, D1, and R2 at port 3119. It expects `.bilaga-token`, creates synthetic test files, checks chunk retries and byte equality, and deletes test transfers. It changes only one synthetic local record's expiry to verify expiry and cleanup. Do not point this test at production.
 
@@ -20,7 +20,7 @@ Run `npx tsc --noEmit` and `npm run build` before publication. `public/bilaga.py
 
 Uploads need a private test token. One token currently acts as one owner; it is not a production account system. A token can create, inspect, mark sent, and delete its own transfers. Account deletion is deliberately absent from the API.
 
-Files are capped at 1 decimal GB, uploaded sequentially in 8 MiB chunks. The server buffers only one bounded chunk per request. The preview limits new sessions to 100/day per token; production requires atomic per-account quotas and stronger concurrency controls. Downloads stream from R2, support byte ranges, and always use attachment headers. No charges are applied. Quoted prices describe planned billing only.
+Files are capped at 1 decimal GB, uploaded sequentially in 8 MiB chunks. The server buffers only one bounded chunk per request. Atomic reservations enforce 100 new sessions/day, three unfinished uploads, and 10 GB reserved storage per token. Persisted limits allow 300 authenticated API requests/minute per token and 120 download requests/minute per link. Chunk identities are immutable SHA-256 digests; matching retries are idempotent. Chunk bodies have a 30-second deadline, and a per-isolate guard limits concurrent buffered chunks to two. Downloads stream from R2, support byte ranges, and always use attachment headers. No charges are applied. Quoted prices describe planned billing only.
 
 A completed upload becomes available for seven days. Downloads check expiry and deletion before reading R2. A download already underway can finish after expiry or deletion. Inaccessible files are removed by a bounded cleanup pass during transfer creation or authenticated `POST /api/cleanup`. Background scheduling is not configured, so bytes can persist beyond expiry while the prototype is idle. Abandoned uploads expire after 24 hours. Metadata remains for status; deletion removes the file name and sender label. This is not an account-erasure implementation.
 
@@ -31,3 +31,7 @@ A feature-detected WebMCP tool refreshes the currently displayed transfer. The H
 ## Next session
 
 Connect the chosen domain and decide whether to retain managed Sites hosting or deploy this Worker in the owner's Cloudflare account. Add Google authentication, revocable scoped API tokens, Stripe Checkout top-ups, a dollar-denominated transactional ledger, and owner-only account deletion in the app. Decide unused-balance/refund handling before launch. Add scheduled expiry cleanup and incomplete multipart cleanup, atomic spending reservations and release, rate and storage limits, and confirmed-payment handling with idempotency. Bonus credit, outbound webhooks, automatic top-ups, and higher file limits are not yet committed features.
+
+## Security review
+
+See [the security and performance review](docs/security-review.md) for tested controls, dependency findings, measurements, and remaining public-launch requirements.
