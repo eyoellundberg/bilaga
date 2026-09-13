@@ -103,3 +103,8 @@ export const apiTokens = sqliteTable(
   },
   (t) => [index('idx_tokens_account').on(t.accountId)],
 );
+
+export const waitlist = sqliteTable('waitlist', {
+  email: text('email').primaryKey(),
+  createdAt: integer('created_at').notNull(),
+});

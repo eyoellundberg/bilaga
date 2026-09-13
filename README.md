@@ -1,6 +1,6 @@
 # Bilaga
 
-Private preview of file transfers for agents, hosted on the existing Cloudflare Worker at https://bilaga.link (also workers.dev). D1 holds accounts and transfer metadata; a private R2 bucket holds file bytes. The older Sites deployment is separate and must not be used for publication.
+Public waitlist with a separate private-preview app for file transfers for agents, hosted on the existing Cloudflare Worker at https://bilaga.link (also workers.dev). D1 holds accounts and transfer metadata; a private R2 bucket holds file bytes. The older Sites deployment is separate and must not be used for publication.
 
 ## Current implementation — 13 September 2026
 
@@ -56,3 +56,7 @@ npx wrangler deploy --config wrangler.cloudflare.json
 Use npx wrangler secret list --config wrangler.cloudflare.json to verify secret names without exposing values. Do not use generated Sites hosting configuration. Record the Worker version, migrations, email configuration, and production smoke checks in launch-readiness.md. A successful deployment does not establish inbox delivery or public-launch readiness.
 
 npm run lint covers all application code; unused starter components and the OpenAI Sites plugin were removed. lib/client-api.ts owns browser retries/chunks, lib/http.ts bounded body handling, lib/rules.ts shared limits, and lib/accounts.ts account routes.
+
+## Waitlist
+
+The homepage collects launch-interest emails in D1 table waitlist (normalized email primary key and signup timestamp). POST /api/waitlist is same-origin, body-bounded, rate-limited and duplicate-safe, with a honeypot. It sends no automatic email and creates no account. The original homepage/upload UI is at /preview; existing account upload gates remain enforced. The preview URL is discoverable, not an access-control boundary. Launch notifications require a separate sending action.

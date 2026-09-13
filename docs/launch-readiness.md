@@ -55,3 +55,7 @@ Cloudflare [native email Workers API](https://developers.cloudflare.com/email-se
 Removed the agent-name field; new tokens receive an automatic label, and agent access is in an expandable section beneath credit information. Credit balances and refill remain unimplemented; the page states that payments are unavailable. Owner confirmed real sign-in, but Gmail placed the message in junk. Wrangler confirms sending remains enabled; public DNS has one return-path SPF record, the configured DKIM selector and a DMARC reject policy. Owner-provided Gmail headers confirm SPF PASS, DKIM PASS for both bilaga.link and cloudflare-smtp.org, and aligned DMARC PASS. TLS 1.3 was used. Authentication failure is ruled out for that message; Gmail’s exact junk-classification cause is not exposed. Reputation/content filtering remains possible, not established. No speculative DNS changes were made.
 
 Account simplification deployed as Worker version 2cf344be-7a68-49f2-9c65-ce2f3c28dfa0. Build, lint, and TypeScript passed.
+
+## Waitlist starter — 13 September 2026
+
+Homepage replaced with an email waitlist; original app homepage preserved at /preview. Migration 0003 adds the deduplicated waitlist table. Local browser signup and storage verified; invalid email, cross-origin, duplicate, honeypot and rate-limit checks passed. Desktop/mobile layout, lint, TypeScript and build passed. Remote migration applied; Worker 77f8ef8a-48cf-4ad3-9a92-a1ba8e628ec4 deployed and live homepage verified. No launch emails sent.

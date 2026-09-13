@@ -301,6 +301,21 @@ export async function handleApi(req: Request) {
           'Cross-origin changes are not allowed.',
         );
     }
+    if (p.length === 1 && p[0] === 'waitlist') {
+      if (method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST.');
+      if (req.headers.get('Origin') !== u.origin)
+        return fail(403, 'cross_origin', 'Join from the Bilaga website.');
+      await rateLimit(`waitlist:${await sha256(new TextEncoder().encode(req.headers.get('CF-Connecting-IP') || 'local'))}`, 5);
+      const body = await bodyJson(req);
+      const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+      if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+        return fail(400, 'invalid_email', 'Enter a valid email address.');
+      if (!body?.website) {
+        await db().prepare('INSERT INTO waitlist(email,created_at) VALUES(?,?) ON CONFLICT(email) DO NOTHING')
+          .bind(email, Date.now()).run();
+      }
+      return json({ message: 'You’re on the list. We’ll email you when Bilaga is ready.' });
+    }
     const accountResponse = await accountRoutes(req, p, rateLimit);
     if (accountResponse) return accountResponse;
     if (p.length === 1 && p[0] === 'config' && method === 'GET')
