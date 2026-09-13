@@ -57,7 +57,7 @@ def main():
     path='/api/transfers/'+t['id'];request(path+'/parts/1','PUT',b'bye');ready,_=request(path+'/complete','POST')
     sql="UPDATE transfers SET expires_at=1 WHERE id='"+t['id']+"'"
     env=dict(os.environ,WRANGLER_LOG_PATH='.wrangler/logs')
-    subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config',os.environ.get('BILAGA_TEST_CONFIG','wrangler.local.json'),'--persist-to','.wrangler/state','--command',sql],env=env,check=True,stdout=subprocess.DEVNULL)
+    subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config',os.environ.get('BILAGA_TEST_CONFIG','wrangler.cloudflare.json'),'--persist-to','.wrangler/state','--command',sql],env=env,check=True,stdout=subprocess.DEVNULL)
     download='/api/download/'+ready['share_url'].rsplit('/',1)[1]
     request(download,auth=False,expect=410)
     status,_=request(path);assert status['status']=='expired'

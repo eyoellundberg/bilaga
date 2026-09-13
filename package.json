@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vinext build",
+    "build": "rm -rf public/__pycache__ && vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",

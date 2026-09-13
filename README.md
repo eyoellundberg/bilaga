@@ -30,10 +30,10 @@ Local email is simulated, so it proves binding invocation rather than inbox deli
 npm run test:client
 npm run lint
 npx tsc --noEmit
-BILAGA_TEST_CONFIG=wrangler.cloudflare.json BILAGA_TEST_SCHEDULED=1 python3 tests/integration.py
+BILAGA_TEST_SCHEDULED=1 python3 tests/integration.py
 python3 tests/accounts.py
 python3 tests/scheduled.py
-BILAGA_TEST_CONFIG=wrangler.cloudflare.json python3 tests/security.py
+python3 tests/security.py
 python3 tests/interrupted-upload.py
 python3 tests/large-transfer.py
 BILAGA_TEST_BYTES=50000000000 python3 tests/large-transfer.py

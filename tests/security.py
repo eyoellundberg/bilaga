@@ -4,7 +4,7 @@ from html.parser import HTMLParser
 from integration import request,TOKEN
 
 def sql(statement):
- subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config',os.environ.get('BILAGA_TEST_CONFIG','wrangler.local.json'),'--persist-to','.wrangler/state','--command',statement],env=dict(os.environ,WRANGLER_LOG_PATH='.wrangler/logs'),check=True,stdout=subprocess.DEVNULL)
+ subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config',os.environ.get('BILAGA_TEST_CONFIG','wrangler.cloudflare.json'),'--persist-to','.wrangler/state','--command',statement],env=dict(os.environ,WRANGLER_LOG_PATH='.wrangler/logs'),check=True,stdout=subprocess.DEVNULL)
 
 # Origin checks, strict body handling, missing auth, and unused framework endpoints.
 request('/api/transfers','POST',{'filename':'a.txt','size_bytes':1},headers={'Origin':'https://attacker.invalid'},expect=403)
