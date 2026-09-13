@@ -2,7 +2,7 @@
 
 Private preview of file transfers for agents, hosted on the existing Cloudflare Worker at https://bilaga.link (also workers.dev). D1 holds accounts and transfer metadata; a private R2 bucket holds file bytes. The older Sites deployment is separate and must not be used for publication.
 
-## Current implementation — 12 September 2026
+## Current implementation — 13 September 2026
 
 Email magic links are browser-bound, single-use, and expire after 15 minutes. Sessions use HttpOnly, SameSite cookies and last up to 30 days. Accounts manage up to ten individually revocable agent tokens; only token hashes are stored. All tokens for an account share transfers and quotas. New accounts have uploads disabled until explicitly admitted to the private preview. Account deletion requires a sign-in within 15 minutes and typed email confirmation. It immediately revokes sessions, tokens, pending login links, and download links, and redacts email, filenames, and sender labels. Scheduled cleanup removes files with retries. Redacted account/transfer tombstones remain at least one day and until storage purge succeeds.
 
@@ -45,6 +45,14 @@ Run HTTP suites sequentially against synthetic LOCAL data. They manipulate fixtu
 
 The 15-minute scheduled job purges up to 25 eligible transfers/run and aborts unfinished uploads. Failures/backlogs delay physical deletion. A lost storage-allocation response can leave an untracked multipart upload; confirm an R2 abort lifecycle rule as an additional safeguard. Normal transfer metadata remains for status after file purge; account deletion removes redacted tombstones after the grace period. A download already started may finish after revocation or expiry, and recipient copies cannot be recalled.
 
-For the existing direct Cloudflare deployment, apply migration 0002 before deploying account code. Build, apply remote migrations with the explicit wrangler.cloudflare.json configuration, and deploy with the intended .env secrets file. Do not use generated Sites hosting configuration. Record the Worker version, migrations, email configuration, and production smoke checks in launch-readiness.md. Local changes are not evidence of deployment.
+The direct Cloudflare Worker has BILAGA_TOKEN_HASH stored as a Worker secret, verified on 13 September 2026. Migration 0002 is applied remotely. Routine deployments do not need --env-file; the .env file remains for local validation only. Use the explicit direct Cloudflare configuration:
+
+```sh
+npm run build
+npx wrangler d1 migrations apply DB --remote --config wrangler.cloudflare.json
+npx wrangler deploy --config wrangler.cloudflare.json
+```
+
+Use npx wrangler secret list --config wrangler.cloudflare.json to verify secret names without exposing values. Do not use generated Sites hosting configuration. Record the Worker version, migrations, email configuration, and production smoke checks in launch-readiness.md. A successful deployment does not establish inbox delivery or public-launch readiness.
 
 npm run lint covers all application code; unused starter components and the OpenAI Sites plugin were removed. lib/client-api.ts owns browser retries/chunks, lib/http.ts bounded body handling, lib/rules.ts shared limits, and lib/accounts.ts account routes.

@@ -1,8 +1,18 @@
-# Launch readiness — 12 September 2026
+# Launch readiness — 13 September 2026
 
-This file separates current implementation from verification and publication. The existing direct Cloudflare Worker at bilaga.link is the deployment target. This session changes and tests local source; no publication has been performed or verified for the account/large-file/policy changes.
+This file separates current implementation from verification and publication. The existing direct Cloudflare Worker at bilaga.link is the deployment target. The account/large-file/policy source was deployed on 13 September 2026. Deployment evidence is below; this is not public-launch certification.
 
-## Verification in this session
+## Direct Cloudflare deployment — 13 September 2026
+
+- Wrangler OAuth renewed with email_sending:write. CLI confirmed bilaga.link Email Sending was already enabled since 12 September 2026. Public DNS resolves the configured return-path MX, SPF, DKIM and DMARC records; no domain/DNS changes were needed.
+- BILAGA_TOKEN_HASH uploaded from the ignored local .env without printing its value; secret list confirmed secret_text.
+- Remote migration 0002_lowly_bulldozer.sql applied successfully (12 commands).
+- Build, lint, TypeScript and all five client tests passed.
+- Worker version 24020af6-3767-4e95-923c-57e3b7f2f7d6 deployed at https://bilaga.link and the existing workers.dev address, with EMAIL, DB, FILES, ASSETS, canonical AUTH_ORIGIN and the 15-minute cleanup schedule.
+- Live /account rendered the email sign-in form. A CLI POST to /api/auth/request for the owner inbox returned HTTP 200 after the Email Service send call completed. Inbox receipt and completed browser-bound sign-in remain unverified. The CLI request is sending-path evidence only; request a fresh link from the browser for the end-to-end sign-in test.
+- No openai-sites or sites executable was found on PATH. Native Sites listing confirmed the old Bilaga project remains active and public at https://bilaga.eyoel-lundberg.chatgpt.site. The available connector has no project deletion operation. Dashboard deletion remains outstanding.
+
+## Historical local verification — 12 September 2026
 
 | Check | Result |
 |---|---|
@@ -29,8 +39,8 @@ The account page handles login fragments at mount and during existing-tab naviga
 ## Missing before public enrollment / paid launch
 
 - Confirm legal operator, contact address, business address, abuse reporting channel, and response process; replace Lorem ipsum and finalize privacy/terms. Confirm processing purposes/bases and rights requests, customer-file controller/processor roles and any DPA, Cloudflare processing agreements/locations/transfer safeguards, provider email/log/backup retention. Do not claim EU-only storage or immediate physical erasure.
-- Enable and verify Cloudflare Email Service sending for login@bilaga.link, including actual delivery, same-browser confirmation, expired/reused links, and failure handling. Native sending uses the current Email Service API, not the older Email Routing-only model.
-- Apply account migration 0002 to the target D1 before account code publication. Record Worker version and smoke-test canonical HTTPS, account isolation, token revocation, deletion, scheduled cleanup, and current API limits after deployment.
+- Email Sending is enabled and the live login send request succeeded. Verify actual inbox delivery, same-browser confirmation, expired/reused links, and failure handling. Native sending uses the current Email Service API, not the older Email Routing-only model.
+- Migration 0002 and account code deployment are complete (see above). Complete production smoke tests for account isolation, token revocation, deletion, scheduled cleanup, and current API limits.
 - Complete full-size local testing, then separately validate real Cloudflare/R2 reliability, representative connections, interruption/network failure and lost response recovery, throughput and Worker resource limits. Local emulator success is not production load certification.
 - Confirm an R2 lifecycle rule that aborts orphan multipart allocations; test cleanup failures/backlogs and operational alerting. Scheduled cleanup is bounded and cannot promise immediate physical deletion. Confirm storage budgets, edge/global abuse limits, monitoring and incident response.
 - Decide the public content/scanning/quarantine policy; current preview files are opaque and unscanned. Define a process for takedowns and malicious files.
