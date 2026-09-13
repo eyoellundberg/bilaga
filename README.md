@@ -28,7 +28,7 @@ Local email is simulated, so it proves binding invocation rather than inbox deli
 
 ```sh
 npm run test:client
-npm run lint:app
+npm run lint
 npx tsc --noEmit
 BILAGA_TEST_CONFIG=wrangler.cloudflare.json BILAGA_TEST_SCHEDULED=1 python3 tests/integration.py
 python3 tests/accounts.py
@@ -47,4 +47,4 @@ The 15-minute scheduled job purges up to 25 eligible transfers/run and aborts un
 
 For the existing direct Cloudflare deployment, apply migration 0002 before deploying account code. Build, apply remote migrations with the explicit wrangler.cloudflare.json configuration, and deploy with the intended .env secrets file. Do not use generated Sites hosting configuration. Record the Worker version, migrations, email configuration, and production smoke checks in launch-readiness.md. Local changes are not evidence of deployment.
 
-Application lint covers used code; broad npm run lint includes historical findings in unused starter components. lib/client-api.ts owns browser retries/chunks, lib/http.ts bounded body handling, lib/rules.ts shared limits, and lib/accounts.ts account routes.
+npm run lint covers all application code; unused starter components and the OpenAI Sites plugin were removed. lib/client-api.ts owns browser retries/chunks, lib/http.ts bounded body handling, lib/rules.ts shared limits, and lib/accounts.ts account routes.

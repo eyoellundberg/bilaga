@@ -1,5 +1,4 @@
 @import 'tailwindcss' source(none);
-@import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @source './';
 @source '../components/ui/button.tsx';
