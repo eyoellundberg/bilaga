@@ -9,7 +9,7 @@ This file separates current implementation from verification and publication. Th
 - Remote migration 0002_lowly_bulldozer.sql applied successfully (12 commands).
 - Build, lint, TypeScript and all five client tests passed.
 - Worker version 24020af6-3767-4e95-923c-57e3b7f2f7d6 deployed at https://bilaga.link and the existing workers.dev address, with EMAIL, DB, FILES, ASSETS, canonical AUTH_ORIGIN and the 15-minute cleanup schedule.
-- Live /account rendered the email sign-in form. A CLI POST to /api/auth/request for the owner inbox returned HTTP 200 after the Email Service send call completed. Inbox receipt and completed browser-bound sign-in remain unverified. The CLI request is sending-path evidence only; request a fresh link from the browser for the end-to-end sign-in test.
+- Live /account rendered the email sign-in form. A CLI POST to /api/auth/request for the owner inbox returned HTTP 200 after the Email Service send call completed. Owner confirmed inbox receipt and successful browser sign-in on 13 September; the message landed in junk, so inbox placement remains unresolved. The CLI request is sending-path evidence only; request a fresh link from the browser for the end-to-end sign-in test.
 - No openai-sites or sites executable was found on PATH. Native Sites listing confirmed the old Bilaga project remains active and public at https://bilaga.eyoel-lundberg.chatgpt.site. The available connector has no project deletion operation. Dashboard deletion remains outstanding.
 
 ## Historical local verification — 12 September 2026
@@ -49,3 +49,9 @@ The account page handles login fragments at mount and during existing-tab naviga
 ## Sources for policy / provider review
 
 Cloudflare [native email Workers API](https://developers.cloudflare.com/email-service/api/send-emails/workers-api/) and [local simulated sending](https://developers.cloudflare.com/email-service/local-development/sending/). EDPB [controller and processor guidance](https://www.edpb.europa.eu/sme/learn-the-basics/data-controller-or-data-processor_en), and the EU Labour Authority [GDPR manual](https://www.ela.europa.eu/sites/default/files/2023-02/ELA_GDPR_Training_Manual_final_2023.pdf) describe information notices must address. These informed draft completeness; no legal compliance certification is asserted.
+
+## Account simplicity and email placement — 13 September 2026
+
+Removed the agent-name field; new tokens receive an automatic label, and agent access is in an expandable section beneath credit information. Credit balances and refill remain unimplemented; the page states that payments are unavailable. Owner confirmed real sign-in, but Gmail placed the message in junk. Wrangler confirms sending remains enabled; public DNS has one return-path SPF record, the configured DKIM selector and a DMARC reject policy. Owner-provided Gmail headers confirm SPF PASS, DKIM PASS for both bilaga.link and cloudflare-smtp.org, and aligned DMARC PASS. TLS 1.3 was used. Authentication failure is ruled out for that message; Gmail’s exact junk-classification cause is not exposed. Reputation/content filtering remains possible, not established. No speculative DNS changes were made.
+
+Account simplification deployed as Worker version 2cf344be-7a68-49f2-9c65-ce2f3c28dfa0. Build, lint, and TypeScript passed.

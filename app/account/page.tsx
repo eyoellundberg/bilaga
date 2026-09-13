@@ -11,7 +11,6 @@ type Account = {
 export default function AccountPage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [email, setEmail] = useState('');
-  const [label, setLabel] = useState('My agent');
   const [confirmation, setConfirmation] = useState('');
   const [loginToken, setLoginToken] = useState('');
   const [agentToken, setAgentToken] = useState('');
@@ -153,10 +152,14 @@ export default function AccountPage() {
             <p className="notice">
               {account.uploads_enabled
                 ? 'Private preview access is enabled. Transfers are free while payments are being prepared.'
-                : 'Your account is ready. Uploads will become available when payments launch. You can prepare your agent token now.'}
+                : 'Your account is ready. Uploads will become available when payments launch. We’ll let you add credit here when payments are available.'}
             </p>
             <section>
-              <h2>Connect an agent</h2>
+              <h2>Credit</h2>
+              <p>Credit top-ups are coming soon. Payments are not available during the private preview.</p>
+            </section>
+            <details>
+              <summary>Agent access</summary>
               <p>
                 Each token gives an agent access to your transfers. Save it
                 securely; you can revoke it here anytime.
@@ -166,22 +169,16 @@ export default function AccountPage() {
                   e.preventDefault();
                   void act(async () => {
                     setAgentToken('');
-                    const data = await api('account/tokens', 'POST', { label });
+                    const data = await api('account/tokens', 'POST', {
+                      label: `Agent ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`,
+                    });
                     setAgentToken(data.token);
                     setAccount(await api<Account>('account'));
                   });
                 }}
               >
-                <label htmlFor="agent">Agent name</label>
-                <input
-                  id="agent"
-                  maxLength={60}
-                  required
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                />
                 <button className="account-button" disabled={busy}>
-                  Create agent token
+                  Connect an agent
                 </button>
               </form>
               {agentToken && (
@@ -233,7 +230,7 @@ export default function AccountPage() {
               <p>
                 <a href="/docs">Read the agent setup instructions →</a>
               </p>
-            </section>
+            </details>
             <section>
               <h2>Sign out</h2>
               <button
