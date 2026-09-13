@@ -1,15 +1,15 @@
 """Security regressions against LOCAL synthetic fixtures only; never public uploads."""
-import concurrent.futures,hashlib,json,os,re,subprocess,time
+import concurrent.futures,gzip,hashlib,json,os,re,subprocess,time
 from html.parser import HTMLParser
 from integration import request,TOKEN
 
 def sql(statement):
- subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config','wrangler.local.json','--persist-to','.wrangler/state','--command',statement],env=dict(os.environ,WRANGLER_LOG_PATH='.wrangler/logs'),check=True,stdout=subprocess.DEVNULL)
+ subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config',os.environ.get('BILAGA_TEST_CONFIG','wrangler.local.json'),'--persist-to','.wrangler/state','--command',statement],env=dict(os.environ,WRANGLER_LOG_PATH='.wrangler/logs'),check=True,stdout=subprocess.DEVNULL)
 
 # Origin checks, strict body handling, missing auth, and unused framework endpoints.
 request('/api/transfers','POST',{'filename':'a.txt','size_bytes':1},headers={'Origin':'https://attacker.invalid'},expect=403)
 request('/api/transfers','POST',b'{}',headers={'Content-Type':'text/plain'},expect=415)
-request('/api/transfers','POST',b'{}',headers={'Content-Encoding':'gzip'},expect=415)
+request('/api/transfers','POST',gzip.compress(b'{}'),headers={'Content-Encoding':'gzip'},expect=415)
 request('/','POST',b'[]',auth=False,headers={'next-action':'untrusted'},expect=405)
 request('/api/transfers','POST',b'{}',headers={'next-action':'untrusted'},expect=405)
 request('/api/transfers','POST',{'filename':'x','size_bytes':1,'sender':'x'*5000},expect=413)
@@ -93,7 +93,7 @@ status,_=request(p);assert status['status']=='deleted'
 
 # Persisted quotas are enforced before R2 allocation, including across concurrent requests.
 owner=hashlib.sha256(TOKEN.encode()).hexdigest();now=int(time.time()*1000)
-sql(f"INSERT INTO transfers (id,public_id,owner,filename,size,state,created_at,expires_at,purged_at) VALUES ('audit-cap','audit-cap','{owner}','quota fixture',10000000000,'complete',{now},{now+60000},NULL)")
+sql(f"INSERT INTO transfers (id,public_id,owner,filename,size,state,created_at,expires_at,purged_at) VALUES ('audit-cap','audit-cap','{owner}','quota fixture',100000000000,'complete',{now},{now+60000},NULL)")
 try:request('/api/transfers','POST',{'filename':'over-budget.txt','size_bytes':1},expect=429)
 finally:sql("DELETE FROM transfers WHERE id='audit-cap'")
 

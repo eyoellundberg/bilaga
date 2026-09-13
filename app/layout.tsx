@@ -1,16 +1,23 @@
 import type { Metadata } from 'next';
 import './globals.css';
+/* oxlint-disable next/no-html-link-for-pages */
 export const metadata: Metadata = {
-  title: 'Bilaga — File delivery for agents',
+  title: 'Bilaga — File transfers for agents',
   description:
-    'A file. A link. That’s the handoff. Share files from your agent with a simple download link, available for seven days.',
+    'Your agent sends the file. Anyone with the link can download it.',
 };
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <footer className="shell policy-footer">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+        </footer>
+      </body>
     </html>
   );
 }

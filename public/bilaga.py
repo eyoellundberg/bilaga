@@ -60,8 +60,9 @@ try:
     else:
         path=args.file
         size=path.stat().st_size
-        if not 0<size<=1_000_000_000:
-            raise RuntimeError('The preview accepts non-empty files up to 1 GB.')
+        config=api('config')
+        if not 0<size<=config['max_file_bytes']:
+            raise RuntimeError(f"File must be non-empty and no larger than {config['max_file_bytes']} bytes.")
         if args.resume:
             transfer=api('transfers/'+args.resume)
             if transfer['filename']!=path.name or transfer['size_bytes']!=size:
@@ -73,7 +74,7 @@ try:
         if transfer['status']=='complete':
             result=transfer
         else:
-            uploaded={p['number'] for p in transfer.get('parts',[])}
+            uploaded={p['number'] for p in transfer.get('parts',[]) if p.get('etag')}
             with path.open('rb') as file:
                 n=1
                 while chunk:=file.read(transfer['part_size_bytes']):

@@ -1,10 +1,10 @@
 # Bilaga
 
-> File delivery for agents. Upload a file, get a shareable download page, and poll for download activity. Recipients need no account. Completed transfers expire after seven days.
+> File delivery for agents. Upload a file, get a shareable download page, and poll for download activity. Recipients need no account. Completed transfers expire after 30 days.
 
 ## Current availability
 
-Private upload preview, not a paid public service. Obtain a test token from the Bilaga owner. Google sign-in, Stripe top-ups, account deletion, balances, automatic top-ups, and outbound webhooks are not implemented. Preview transfers cost $0. Files are limited to 1,000,000,000 bytes (1 decimal GB), with up to 100 new transfers per day, 3 unfinished uploads, and 10 GB of reserved storage per test token. Limits are reserved atomically before storage allocation. The API allows 300 authenticated requests per minute per token and 120 download requests per minute per link. The quoted future price is max($0.25, $0.10 per decimal GB), rounded up to a cent. Larger quotes do not mean larger uploads are supported.
+Private upload preview, not a paid public service. Sign in at https://bilaga.link/account using an emailed, single-use link, and create a revocable agent token. New accounts can manage tokens and delete their account, but uploads remain disabled until explicitly enabled for the private preview. Existing owner test-token access continues. Stripe top-ups and balances are not implemented; preview transfers cost $0. Files are limited to 50,000,000,000 bytes (50 decimal GB), with up to 100 new transfers per day, 3 unfinished uploads, and 100 GB of reserved storage per owner. Full 50 GB reliability validation is still pending. Limits are reserved atomically before storage allocation. The API allows 300 authenticated requests per minute per owner and 120 download requests per minute per link. The quoted future price is max($0.25, $0.10 per decimal GB), rounded up to a cent.
 
 ## Agent resources
 
@@ -14,7 +14,7 @@ Private upload preview, not a paid public service. Obtain a test token from the 
 
 ## Authentication
 
-Send `Authorization: Bearer YOUR_TEST_TOKEN` to the API on this site's origin only. Identify your client with `User-Agent: Bilaga-Client/0.1` (or your own descriptive client name); the temporary host rejects Python's default user agent. Keep tokens in the environment or a secret store. Never include a token in a share URL, logs, messages, or a recipient download request. The token grants access to all transfers created with it. Account deletion is not available through this API.
+Send `Authorization: Bearer YOUR_AGENT_TOKEN` to the API on this site's origin only. Identify your client with `User-Agent: Bilaga-Client/0.1` (or your own descriptive client name); the temporary host rejects Python's default user agent. Keep tokens in the environment or a secret store. Never include a token in a share URL, logs, messages, or a recipient download request. All tokens belonging to one account share access to that account’s transfers and quotas. Account deletion is not available through this API.
 
 ## Upload sequence
 
@@ -22,7 +22,7 @@ Send `Authorization: Bearer YOUR_TEST_TOKEN` to the API on this site's origin on
 2. Divide the file into `part_size_bytes` chunks (currently 8,388,608 bytes). PUT each raw binary chunk to /api/transfers/{id}/parts/{number}, starting at 1. Every chunk except the last must have exactly the declared chunk size. Send chunks sequentially. Retry only failed chunks, keeping the file unchanged. A part becomes immutable once first submitted; retrying with different bytes returns 409. Each request must finish sending its body within 30 seconds.
 3. GET /api/transfers/{id} to inspect uploaded `parts` when resuming. Do not overwrite parts concurrently, or modify a file between upload attempts.
 4. POST /api/transfers/{id}/complete after all parts succeed. This returns `share_url` and `expires_at`. Retrying completion after success returns the same link and expiry. Share only the public `share_url`, not the private API id or token.
-5. Deliver the link through your existing user-authorized communication channel. POST /api/transfers/{id}/sent to record that YOU delivered the link. Bilaga does not send email or messages.
+5. Deliver the link through your existing user-authorized communication channel. POST /api/transfers/{id}/sent to record that YOU delivered the link. Bilaga sends sign-in emails only; it does not deliver recipient links or messages.
 6. GET /api/transfers/{id} to poll status (no faster than once every 15 seconds). `download_requests` counts GET download requests, including range requests. It is not a count of people, confirmed completed downloads, or proof a person read the file. HEAD requests do not increment it. No webhooks are sent in this preview.
 7. DELETE /api/transfers/{id} to revoke the link and delete stored bytes. Retrying deletion is safe. Deleting a transfer does not delete the account.
 
@@ -32,10 +32,22 @@ Send `Authorization: Bearer YOUR_TEST_TOKEN` to the API on this site's origin on
 
 ## Storage cleanup
 
-Access expiry is enforced on every download request. Expired stored files are removed by a bounded cleanup pass when new transfers are created, or by the authenticated POST /api/cleanup endpoint. Background cleanup scheduling is not yet enabled; an idle prototype may retain inaccessible bytes longer than seven days. Unfinished uploads use a 24-hour expiry.
+Access expiry is enforced on every download request. Expired stored files are removed by a bounded cleanup pass when new transfers are created, or by the private owner-only POST /api/cleanup endpoint. A scheduled cleanup job also runs every 15 minutes, removing up to 25 expired or deleted transfers per run, including aborting unfinished multipart uploads. Failed deletions remain eligible for retry; backlogs or storage failures can delay physical deletion. Unfinished uploads use a 24-hour expiry.
 
 ## Errors and billing
 
-Responses are JSON except file downloads. Errors have {"error":{"code":"...","message":"..."}}. 401 means missing/invalid token; 400 invalid input; 404 unavailable; 409 invalid/incomplete upload state; 410 expired/deleted; 413 chunk too large; 429 preview quota; 503 upload configuration unavailable. Retry network errors and 5xx with bounded exponential backoff. On 429, respect the Retry-After header. Cross-origin browser mutations and encoded/compressed HTTP request bodies are rejected. Poll before retrying an ambiguous completion.
+Responses are JSON except file downloads. Errors have {"error":{"code":"...","message":"..."}}. 401 means missing/invalid token; 400 invalid input; 404 unavailable; 409 invalid/incomplete upload state; 410 expired/deleted; 413 chunk too large; 429 preview quota; 403 account uploads not enabled; 503 email or service configuration unavailable. Retry network errors and 5xx with bounded exponential backoff. On 429, respect the Retry-After header. Cross-origin browser mutations and encoded/compressed HTTP request bodies are rejected. Poll before retrying an ambiguous completion.
 
 GET /api/quote?bytes=1000000000 returns a future price estimate and whether uploading is allowed. `charged_usd` is always 0 in the preview. No funds are collected or deducted. Do not claim a payment was taken or a file was sent merely because an upload completed.
+
+## Launch offer (not enabled in this preview)
+
+Domain: https://bilaga.link. Planned paid top-ups: USD 15 or 30. Price: USD 0.10 per decimal GB, minimum USD 0.25 per completed transfer. Purchased credit expires 24 months after each purchase. File availability: 30 days after completion. Maximum accepted size: 50 GB, with full-size reliability testing pending. Current API limits and no-charge preview status above remain authoritative. Customer tokens remain valid until revoked or account deletion; an empty balance will block uploads without revoking the token.
+
+## Account management
+
+Account creation, sign-in, token creation/revocation, sign-out, and account deletion are website-only flows at /account. Agent tokens cannot manage or delete accounts. Magic links expire after 15 minutes, can be used once, and must be opened in the browser that requested the link. Browser sessions last up to 30 days. Tokens are shown once; only hashes are stored. All an account's tokens share ownership and quotas. Account deletion requires a sign-in within the last 15 minutes and typed email confirmation. It immediately revokes sessions/tokens and download links and redacts the email, filenames, and sender labels. Files are removed by scheduled cleanup with retries; redacted transfer/account tombstones are removed after one day once file purge succeeds. Downloads already underway may finish. Never put a token in a public URL or send account-deletion requests from an agent.
+
+## Privacy and terms
+
+/privacy and /terms describe the free preview, essential cookies, account erasure, public-link access, unscanned files, chunk limits, and recovery. They remain drafts with Lorem ipsum operator/contact placeholders and unresolved provider/legal details. Do not claim these policies are final or that the service is ready for unrestricted public enrollment.

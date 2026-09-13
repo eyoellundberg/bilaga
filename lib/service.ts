@@ -1,8 +1,12 @@
+import { json, fail, ApiError, bodyJson, boundedBody } from './http';
+import { accountRoutes, tokenOwner, cleanAccounts } from './accounts';
+export { json } from './http';
+import { sha256 } from './hash';
 import { env } from 'cloudflare:workers';
 import {
   MAX_BYTES,
   PART_BYTES,
-  WEEK,
+  RETENTION,
   DAY,
   MAX_STORED_BYTES,
   MAX_PENDING_UPLOADS,
@@ -49,92 +53,19 @@ const db = () => bindings().DB;
 const bucket = () => bindings().FILES;
 const key = (t: Transfer) => `transfers/${t.id}`;
 const iso = (n: number | null) => (n ? new Date(n).toISOString() : null);
-export const json = (data: unknown, status = 200) =>
-  Response.json(data, {
-    status,
-    headers: {
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'no-referrer',
-    },
-  });
-class ApiError extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-const fail = (status: number, code: string, message: string): never => {
-  throw new ApiError(status, code, message);
-};
-async function sha(value: string) {
-  return Array.from(
-    new Uint8Array(
-      await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
-    ),
-    (b) => b.toString(16).padStart(2, '0'),
-  ).join('');
-}
 async function authorize(req: Request) {
-  const expected = bindings().BILAGA_TOKEN_HASH;
-  if (!expected)
-    return fail(503, 'not_configured', 'Uploads are not configured yet.');
   const token = req.headers
     .get('Authorization')
     ?.match(/^Bearer ([^\s]+)$/)?.[1];
   if (!token || token.length > 256)
-    return fail(401, 'unauthorized', 'A valid Bilaga test token is required.');
-  const actual = await sha(token);
-  let mismatch = actual.length ^ expected.length;
-  for (let i = 0; i < actual.length; i++)
-    mismatch |= actual.charCodeAt(i) ^ (expected.charCodeAt(i) || 0);
-  if (mismatch)
-    return fail(401, 'unauthorized', 'A valid Bilaga test token is required.');
-  return actual;
-}
-async function boundedBody(req: Request, limit: number) {
-  if (!req.body) return new Uint8Array();
-  const declared = req.headers.get('Content-Length');
-  if (
-    declared !== null &&
-    (!/^\d+$/.test(declared) || Number(declared) > limit)
-  )
-    return fail(413, 'too_large', 'Request exceeds its allowed size.');
-  const reader = req.body.getReader(),
-    data = new Uint8Array(limit);
-  let total = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(
-        new ApiError(
-          408,
-          'upload_timeout',
-          'Upload chunk timed out. Retry this chunk.',
-        ),
-      );
-      void reader.cancel().catch(() => {});
-    }, 30_000);
-  });
-  try {
-    while (true) {
-      const { done, value } = await Promise.race([reader.read(), timeout]);
-      if (done) break;
-      if (total + value.byteLength > limit) {
-        void reader.cancel().catch(() => {});
-        return fail(413, 'too_large', 'Request exceeds its allowed size.');
-      }
-      data.set(value, total);
-      total += value.byteLength;
-    }
-  } finally {
-    clearTimeout(timer);
-    reader.releaseLock();
-  }
-  return data.subarray(0, total);
+    return fail(401, 'unauthorized', 'A valid Bilaga token is required.');
+  const actual = await sha256(new TextEncoder().encode(token));
+  const expected = bindings().BILAGA_TOKEN_HASH;
+  if (expected && actual === expected) return actual;
+  const owner = await tokenOwner(actual);
+  if (!owner)
+    return fail(401, 'unauthorized', 'A valid Bilaga token is required.');
+  return owner;
 }
 async function rateLimit(scope: string, limit: number) {
   const now = Date.now(),
@@ -152,14 +83,6 @@ async function rateLimit(scope: string, limit: number) {
       'rate_limited',
       'Too many requests. Wait a minute before retrying.',
     );
-}
-async function bodyJson(req: Request) {
-  try {
-    return JSON.parse(new TextDecoder().decode(await boundedBody(req, 4096)));
-  } catch (e) {
-    if (e instanceof ApiError) throw e;
-    return fail(400, 'invalid_json', 'Send a JSON object.');
-  }
 }
 async function owned(id: string, owner: string) {
   const t = await db()
@@ -265,6 +188,7 @@ export async function cleanup() {
     )
     .bind(Date.now() - DAY)
     .run();
+  await cleanAccounts();
   return removed;
 }
 export async function publicTransfer(id: string) {
@@ -377,6 +301,8 @@ export async function handleApi(req: Request) {
           'Cross-origin changes are not allowed.',
         );
     }
+    const accountResponse = await accountRoutes(req, p, rateLimit);
+    if (accountResponse) return accountResponse;
     if (p.length === 1 && p[0] === 'config' && method === 'GET')
       return json({
         mode: 'private_preview',
@@ -385,9 +311,9 @@ export async function handleApi(req: Request) {
         max_pending_uploads: MAX_PENDING_UPLOADS,
         max_daily_transfers: MAX_DAILY_TRANSFERS,
         part_size_bytes: PART_BYTES,
-        retention_days: 7,
+        retention_days: 30,
         billing: 'preview_no_charge',
-        auth: 'bearer_token',
+        auth: 'magic_link_and_bearer_token',
         signals: 'polling',
         uploads_configured: !!bindings().BILAGA_TOKEN_HASH,
       });
@@ -418,11 +344,28 @@ export async function handleApi(req: Request) {
       return await download(req, p[1]);
     const owner = await authorize(req);
     await rateLimit(`owner:${owner}`, 300);
-    if (p.length === 1 && p[0] === 'cleanup' && method === 'POST')
+    if (p.length === 1 && p[0] === 'cleanup' && method === 'POST') {
+      if (owner !== bindings().BILAGA_TOKEN_HASH)
+        return fail(403, 'forbidden', 'Owner access required.');
       return json({ removed: await cleanup() });
+    }
     if (p[0] !== 'transfers')
       return fail(404, 'not_found', 'Endpoint not found.');
     if (p.length === 1 && method === 'POST') {
+      if (owner.length === 32) {
+        const allowed = await db()
+          .prepare(
+            'SELECT id FROM accounts WHERE id=? AND deleted_at IS NULL AND uploads_enabled=1',
+          )
+          .bind(owner)
+          .first();
+        if (!allowed)
+          return fail(
+            403,
+            'uploads_pending',
+            'Account uploads are not enabled yet. Payments are still being prepared.',
+          );
+      }
       if (
         req.headers.get('Content-Type')?.split(';')[0].trim() !==
         'application/json'
@@ -435,7 +378,7 @@ export async function handleApi(req: Request) {
         return fail(
           400,
           'invalid_size',
-          'This preview accepts files from 1 byte to 1 GB.',
+          'Files must be between 1 byte and 50 GB.',
         );
       let filename: string;
       try {
@@ -460,6 +403,7 @@ export async function handleApi(req: Request) {
       const reservation = await db()
         .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,state,created_at,expires_at)
       SELECT ?,?,?,?,?,?,'initializing',?,? WHERE
+      (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL AND uploads_enabled=1)) AND
       (SELECT count(*) FROM transfers WHERE owner=? AND created_at>?) < ? AND
       (SELECT count(*) FROM transfers WHERE owner=? AND state IN ('initializing','uploading','completing') AND purged_at IS NULL) < ? AND
       COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ? RETURNING id`)
@@ -472,6 +416,8 @@ export async function handleApi(req: Request) {
           body.sender || null,
           now,
           now + DAY,
+          owner,
+          owner,
           owner,
           now - DAY,
           MAX_DAILY_TRANSFERS,
@@ -486,7 +432,7 @@ export async function handleApi(req: Request) {
         return fail(
           429,
           'preview_limit',
-          'Preview limit reached: 100 transfers per day, 3 unfinished uploads, or 10 GB reserved storage.',
+          'Preview limit reached: 100 transfers per day, 3 unfinished uploads, or 100 GB reserved storage.',
         );
       let multi: R2MultipartUpload | undefined;
       try {
@@ -567,10 +513,7 @@ export async function handleApi(req: Request) {
             'invalid_part_size',
             `Expected ${expected} bytes for this part.`,
           );
-        const hash = Array.from(
-          new Uint8Array(await crypto.subtle.digest('SHA-256', data)),
-          (b) => b.toString(16).padStart(2, '0'),
-        ).join('');
+        const hash = await sha256(data);
         // Reserve an immutable chunk identity. Concurrent retries cannot replace it with different bytes.
         const reserved = await db()
           .prepare(`INSERT INTO parts (transfer_id,number,etag,size,content_hash)
@@ -660,7 +603,7 @@ export async function handleApi(req: Request) {
         .prepare(
           "UPDATE transfers SET state='complete',completed_at=?,expires_at=?,upload_id=NULL WHERE id=? AND state IN ('uploading','completing')",
         )
-        .bind(now, now + WEEK, t.id)
+        .bind(now, now + RETENTION, t.id)
         .run();
       t = await owned(t.id, owner);
       // Deletion can race completion; never revive a revoked transfer or keep its bytes.

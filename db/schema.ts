@@ -54,3 +54,52 @@ export const rateLimits = sqliteTable(
   },
   (t) => [index('idx_rate_limits_reset').on(t.resetAt)],
 );
+
+export const accounts = sqliteTable('accounts', {
+  id: text('id').primaryKey(),
+  email: text('email').unique(),
+  createdAt: integer('created_at').notNull(),
+  deletedAt: integer('deleted_at'),
+  uploadsEnabled: integer('uploads_enabled').notNull().default(0),
+});
+export const loginLinks = sqliteTable(
+  'login_links',
+  {
+    hash: text('hash').primaryKey(),
+    email: text('email').notNull(),
+    browserHash: text('browser_hash').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (t) => [
+    index('idx_login_links_email').on(t.email),
+    index('idx_login_links_expiry').on(t.expiresAt),
+  ],
+);
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    hash: text('hash').primaryKey(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (t) => [
+    index('idx_sessions_account').on(t.accountId),
+    index('idx_sessions_expiry').on(t.expiresAt),
+  ],
+);
+export const apiTokens = sqliteTable(
+  'api_tokens',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => accounts.id),
+    hash: text('hash').notNull().unique(),
+    label: text('label').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('idx_tokens_account').on(t.accountId)],
+);

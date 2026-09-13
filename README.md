@@ -1,37 +1,50 @@
 # Bilaga
 
-A working preview of agent file delivery: authenticated multipart upload, public download pages, seven-day access expiry, sender-reported delivery, download-request status, and transfer deletion.
+Private preview of file transfers for agents, hosted on the existing Cloudflare Worker at https://bilaga.link (also workers.dev). D1 holds accounts and transfer metadata; a private R2 bucket holds file bytes. The older Sites deployment is separate and must not be used for publication.
 
-## Current hosting
+## Current implementation — 12 September 2026
 
-This checkout is a Sites project using a Cloudflare Worker, a managed D1 database (`DB`), and a managed R2 bucket (`FILES`). The Sites deployment is separate from the owner's previously inspected Cloudflare CLI account. `.openai/hosting.json` identifies the hosted project. No Google or Stripe credentials are configured. Public recipient access depends on the site's access policy being public.
+Email magic links are browser-bound, single-use, and expire after 15 minutes. Sessions use HttpOnly, SameSite cookies and last up to 30 days. Accounts manage up to ten individually revocable agent tokens; only token hashes are stored. All tokens for an account share transfers and quotas. New accounts have uploads disabled until explicitly admitted to the private preview. Account deletion requires a sign-in within 15 minutes and typed email confirmation. It immediately revokes sessions, tokens, pending login links, and download links, and redacts email, filenames, and sender labels. Scheduled cleanup removes files with retries. Redacted account/transfer tombstones remain at least one day and until storage purge succeeds.
 
-## Run locally
+Accepted files: 1–50,000,000,000 bytes, sequential 8 MiB multipart requests, 30-day access from completion. Existing transfers keep their original expiry. Limits: 100 creations/day, three unfinished uploads, 100 decimal GB reserved storage per owner, 300 API requests/minute per owner, 120 download requests/minute per link. Uploads expire after 24 hours when unfinished. Matching chunk retries are idempotent; changed bytes are rejected. Resume skips only parts with an ETag. Browser uploads retry chunks within the current page; durable resume across process/page restarts is provided by the Python client, not the browser UI.
 
-Use Node 22.13+ and `npm ci`. Copy `.env.example` to `.env`, set `BILAGA_TOKEN_HASH` to the SHA-256 hex digest of a strong private test token, and keep the raw token outside source control. The initial local token is in the ignored `.bilaga-token` file with owner-only file permissions.
+Downloads stream with ranges and attachment headers. Anyone holding a valid link can download. Files are not malware-scanned or end-to-end encrypted. Download GET requests are counted, including ranges; counts do not prove completed downloads or unique people. The agent reports delivery; Bilaga sends login emails only, not recipient delivery messages.
 
-Apply the generated schema with `npx wrangler d1 execute DB --local --config wrangler.local.json --persist-to .wrangler/state --file drizzle/0000_bright_steel_serpent.sql`, apply `drizzle/0001_shiny_prowler.sql` with the same command, then run `npm run dev -- --port 3119 --strictPort`. Use `WRANGLER_LOG_PATH=.wrangler/logs` if your environment restricts global log writes.
+Enabled preview uploads are free. Stripe, balances, credit reservations, and paid uploads are unimplemented. Planned offer: USD 15/30 top-ups, USD 0.10 per decimal GB, USD 0.25 minimum per completed transfer, credit expiring 24 months after each purchase. Live Stripe testing is deferred.
 
-`python3 tests/integration.py` exercises the local server, D1, and R2 at port 3119. It expects `.bilaga-token`, creates synthetic test files, checks chunk retries and byte equality, and deletes test transfers. It changes only one synthetic local record's expiry to verify expiry and cleanup. Do not point this test at production.
+See [launch readiness](docs/launch-readiness.md) for verification and outstanding work, [security review](docs/security-review.md) for historical checks, and /privacy and /terms for draft preview policies. Operator/contact details and provider retention/transfer arrangements must be confirmed before publishing the policies or opening public enrollment.
 
-Run `npx tsc --noEmit` and `npm run build` before publication. `public/bilaga.py` is the agent client, and `public/llms.txt` describes the complete API contract.
+## Local validation
 
-## Scope and limits
+Use Node 22.13+, Python 3.10+, and npm ci. Keep .env and .bilaga-token ignored and owner-readable. .env contains the intended BILAGA_TOKEN_HASH only. Never print or commit credentials.
 
-Uploads need a private test token. One token currently acts as one owner; it is not a production account system. A token can create, inspect, mark sent, and delete its own transfers. Account deletion is deliberately absent from the API.
+Build with npm run build. Apply all local migrations with npx wrangler d1 migrations apply DB --local --config wrangler.cloudflare.json --persist-to .wrangler/state. Run the built Worker:
 
-Files are capped at 1 decimal GB, uploaded sequentially in 8 MiB chunks. The server buffers only one bounded chunk per request. Atomic reservations enforce 100 new sessions/day, three unfinished uploads, and 10 GB reserved storage per token. Persisted limits allow 300 authenticated API requests/minute per token and 120 download requests/minute per link. Chunk identities are immutable SHA-256 digests; matching retries are idempotent. Chunk bodies have a 30-second deadline, and a per-isolate guard limits concurrent buffered chunks to two. Downloads stream from R2, support byte ranges, and always use attachment headers. No charges are applied. Quoted prices describe planned billing only.
+```sh
+npx wrangler dev --config wrangler.cloudflare.json --ip 127.0.0.1 --local-upstream localhost:3119 --port 3119 --test-scheduled --persist-to .wrangler/state --env-file .env
+```
 
-A completed upload becomes available for seven days. Downloads check expiry and deletion before reading R2. A download already underway can finish after expiry or deletion. Inaccessible files are removed by a bounded cleanup pass during transfer creation or authenticated `POST /api/cleanup`. Background scheduling is not configured, so bytes can persist beyond expiry while the prototype is idle. Abandoned uploads expire after 24 hours. Metadata remains for status; deletion removes the file name and sender label. This is not an account-erasure implementation.
+Local email is simulated, so it proves binding invocation rather than inbox delivery. Cloudflare Email Service domain sending must be enabled for login@bilaga.link before real delivery. AUTH_ORIGIN is https://bilaga.link; localhost:3119 is allowed for local tests.
 
-Status is polled. Download GETs (including range requests) are counted as requests, not confirmed completed downloads or unique recipients. HEAD requests do not count. “Sent” is a report from the delivering agent. No email service or outgoing webhook is required for this prototype.
+```sh
+npm run test:client
+npm run lint:app
+npx tsc --noEmit
+BILAGA_TEST_CONFIG=wrangler.cloudflare.json BILAGA_TEST_SCHEDULED=1 python3 tests/integration.py
+python3 tests/accounts.py
+python3 tests/scheduled.py
+BILAGA_TEST_CONFIG=wrangler.cloudflare.json python3 tests/security.py
+python3 tests/interrupted-upload.py
+python3 tests/large-transfer.py
+BILAGA_TEST_BYTES=50000000000 python3 tests/large-transfer.py
+```
 
-A feature-detected WebMCP tool refreshes the currently displayed transfer. The HTTP API was tested end to end locally and with a live agent transfer. WebMCP registration was observed in the live browser, but valid tool execution was not verified because the browser upload test was not authorized. WebMCP is optional and is not required by the Python client.
+Run HTTP suites sequentially against synthetic LOCAL data. They manipulate fixture expiry/quotas and permanently remove test files. The full transfer uses approximately 50 GB of R2 emulator storage plus a sparse source and bounded buffers; ensure enough disk space. The full test honors request limits, so it can take over 20 minutes. Never point these suites at production. Agent client: public/bilaga.py. API contract: public/llms.txt and /docs.
 
-## Next session
+## Cleanup and publication
 
-Connect the chosen domain and decide whether to retain managed Sites hosting or deploy this Worker in the owner's Cloudflare account. Add Google authentication, revocable scoped API tokens, Stripe Checkout top-ups, a dollar-denominated transactional ledger, and owner-only account deletion in the app. Decide unused-balance/refund handling before launch. Add scheduled expiry cleanup and incomplete multipart cleanup, atomic spending reservations and release, rate and storage limits, and confirmed-payment handling with idempotency. Bonus credit, outbound webhooks, automatic top-ups, and higher file limits are not yet committed features.
+The 15-minute scheduled job purges up to 25 eligible transfers/run and aborts unfinished uploads. Failures/backlogs delay physical deletion. A lost storage-allocation response can leave an untracked multipart upload; confirm an R2 abort lifecycle rule as an additional safeguard. Normal transfer metadata remains for status after file purge; account deletion removes redacted tombstones after the grace period. A download already started may finish after revocation or expiry, and recipient copies cannot be recalled.
 
-## Security review
+For the existing direct Cloudflare deployment, apply migration 0002 before deploying account code. Build, apply remote migrations with the explicit wrangler.cloudflare.json configuration, and deploy with the intended .env secrets file. Do not use generated Sites hosting configuration. Record the Worker version, migrations, email configuration, and production smoke checks in launch-readiness.md. Local changes are not evidence of deployment.
 
-See [the security and performance review](docs/security-review.md) for tested controls, dependency findings, measurements, and remaining public-launch requirements.
+Application lint covers used code; broad npm run lint includes historical findings in unused starter components. lib/client-api.ts owns browser retries/chunks, lib/http.ts bounded body handling, lib/rules.ts shared limits, and lib/accounts.ts account routes.

@@ -1,19 +1,20 @@
-import { ArrowDown, ArrowUpRight, Paperclip, Terminal } from 'lucide-react';
+// Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
+/* oxlint-disable next/no-html-link-for-pages */
+import { Brand } from '@/app/brand';
+import { ArrowDown, ArrowUpRight, Terminal } from 'lucide-react';
 import UploadPanel from './upload-panel';
 
 export default function Home() {
   return (
     <main className="shell">
       <header className="site-header">
-        <a className="brand" href="/" aria-label="Bilaga home">
-          <Paperclip size={27} />
-          bilaga<span className="brand-dot">.</span>
-        </a>
+        <Brand />
         <nav>
           <a href="/docs">
             For agents <ArrowUpRight size={15} />
           </a>
           <a href="#pricing">Pricing</a>
+          <a href="/account">Account</a>
           <span className="pill">
             <i />
             Early preview
@@ -24,21 +25,21 @@ export default function Home() {
         <div className="intro">
           <p className="eyebrow">THE LAST MILE FOR YOUR FILES</p>
           <h1>
-            Made by your agent.
+            File transfers
             <br />
-            <span>Delivered by Bilaga.</span>
+            <span>for agents.</span>
           </h1>
           <p className="lede">
-            A file. A link. That’s the handoff.
+            Your agent sends the file.
             <br />
-            Send from your agent, download from anywhere.
+            Anyone with the link can download it.
           </p>
           <a className="text-link" href="/docs">
             <Terminal size={18} />
             Connect your agent <ArrowUpRight size={18} />
           </a>
           <div className="facts">
-            <span>7 days to download</span>
+            <span>30 days to download</span>
             <span>No recipient account</span>
           </div>
         </div>
@@ -46,27 +47,31 @@ export default function Home() {
       </section>
       <section id="pricing" className="pricing">
         <div>
-          <p className="eyebrow">PAY FOR THE HANDOFF</p>
+          <p className="eyebrow">AT LAUNCH · USD</p>
           <h2>
-            No subscription.
+            Add credit.
             <br />
-            No forgotten monthly bill.
+            Let your agent send.
           </h2>
         </div>
-        <div className="price">
-          <span>$0.10</span>
+        <div className="price launch-price">
+          <span>$15 / $30</span>
           <p>
-            per GB / per transfer
+            prepaid top-ups
             <br />
-            <strong>$0.25 minimum · 7 days included</strong>
+            <strong>$0.10 per GB · $0.25 minimum per transfer</strong>
           </p>
         </div>
         <p className="pricing-note">
-          Add credit once. Your agent takes it from there.
+          1 GB: $0.25 · 10 GB: $1 · 50 GB: $5.
           <br />
-          Google sign-in and payments are coming next.
+          30 days to download at launch. Credit expires 24 months after each
+          purchase. No subscription.
           <br />
-          <strong>This preview does not charge you.</strong>
+          <strong>
+            Today’s preview is free: 50 GB per file, 30 days to download.
+            Large-file reliability testing and payments are still in progress.
+          </strong>
         </p>
       </section>
       <footer>

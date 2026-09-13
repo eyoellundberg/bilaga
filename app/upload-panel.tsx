@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Upload,
   Paperclip,
@@ -13,7 +13,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
-import { MAX_BYTES, fileLabel } from '@/lib/rules';
+import { validSize, fileLabel } from '@/lib/rules';
+import { request, uploadChunks } from '@/lib/client-api';
 
 type Transfer = {
   id: string;
@@ -39,8 +40,8 @@ export default function UploadPanel() {
     activeId = useRef<string | null>(null);
   function choose(f: File | undefined) {
     if (!f) return;
-    if (f.size === 0 || f.size > MAX_BYTES) {
-      setError('Choose a non-empty file up to 1 GB.');
+    if (!validSize(f.size)) {
+      setError('Choose a non-empty file up to 50 GB.');
       return;
     }
     setFile(f);
@@ -48,30 +49,11 @@ export default function UploadPanel() {
     setResult(null);
     setProgress(0);
   }
-  async function api(
-    path: string,
-    method = 'GET',
-    body?: BodyInit,
-    signal?: AbortSignal,
-  ) {
-    const response = await fetch(path, {
-      method,
-      body,
-      signal,
-      headers: {
-        Authorization: `Bearer ${token.trim()}`,
-        ...(typeof body === 'string'
-          ? { 'Content-Type': 'application/json' }
-          : {}),
-      },
-    });
-    const data = (await response.json()) as Transfer & {
-      error?: { message?: string };
-    };
-    if (!response.ok)
-      throw new Error(data.error?.message || 'Please try again.');
-    return data;
-  }
+  const api = useCallback(
+    <T,>(path: string, method = 'GET', body?: BodyInit, signal?: AbortSignal) =>
+      request<T>(path, token, { method, body, signal }),
+    [token],
+  );
   async function send() {
     if (!file || !token.trim() || busy) return;
     setBusy(true);
@@ -80,42 +62,27 @@ export default function UploadPanel() {
     const controller = new AbortController();
     abort.current = controller;
     try {
-      const transfer = await api(
+      const transfer = await api<Transfer>(
         '/api/transfers',
         'POST',
         JSON.stringify({ filename: file.name, size_bytes: file.size }),
         controller.signal,
       );
       activeId.current = transfer.id;
-      for (
-        let offset = 0, part = 1;
-        offset < file.size;
-        offset += transfer.part_size_bytes, part++
-      ) {
-        const chunk = file.slice(
-          offset,
-          Math.min(file.size, offset + transfer.part_size_bytes),
-        );
-        let done = false;
-        for (let attempt = 0; attempt < 3 && !done; attempt++) {
-          try {
-            await api(
-              `/api/transfers/${transfer.id}/parts/${part}`,
-              'PUT',
-              chunk,
-              controller.signal,
-            );
-            done = true;
-          } catch (e) {
-            if (controller.signal.aborted || attempt === 2) throw e;
-            await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
-          }
-        }
-        setProgress(
-          Math.round(Math.min(99, ((offset + chunk.size) / file.size) * 100)),
-        );
-      }
-      const ready = await api(
+      await uploadChunks(
+        file,
+        transfer.part_size_bytes,
+        controller.signal,
+        (part, chunk) =>
+          api(
+            `/api/transfers/${transfer.id}/parts/${part}`,
+            'PUT',
+            chunk,
+            controller.signal,
+          ),
+        setProgress,
+      );
+      const ready = await api<Transfer>(
         `/api/transfers/${transfer.id}/complete`,
         'POST',
         undefined,
@@ -143,10 +110,11 @@ export default function UploadPanel() {
       abort.current = null;
     }
   }
-  async function refresh(id?: string) {
-    const target = id || result?.id;
+  const resultId = result?.id;
+  const refresh = useCallback(async () => {
+    const target = resultId;
     if (!target) throw new Error('Upload a file first.');
-    const current: Transfer = await api(`/api/transfers/${target}`);
+    const current = await api<Transfer>(`/api/transfers/${target}`);
     setResult(current);
     return {
       id: current.id,
@@ -154,7 +122,7 @@ export default function UploadPanel() {
       sent_at: current.sent_at,
       expires_at: current.expires_at,
     };
-  }
+  }, [api, resultId]);
   useEffect(() => {
     const context = (
       document as Document & {
@@ -198,7 +166,7 @@ export default function UploadPanel() {
       ).catch(() => {});
     } catch {}
     return () => lifecycle.abort();
-  }, [token, result?.id]);
+  }, [refresh]);
   const expires = result
     ? new Date(result.expires_at).toLocaleString(undefined, {
         month: 'short',
@@ -315,7 +283,7 @@ export default function UploadPanel() {
             </p>
             {file ? (
               <span className="small">
-                {fileLabel(file.size)} · available for 7 days
+                {fileLabel(file.size)} · available for 30 days
               </span>
             ) : null}
             <input
@@ -336,7 +304,7 @@ export default function UploadPanel() {
               </Button>
             ) : null}
             {!file ? (
-              <span className="small">Up to 1 GB · private preview</span>
+              <span className="small">Up to 50 GB · private preview</span>
             ) : null}
           </div>
           {file ? (

@@ -1,5 +1,7 @@
 # Bilaga security and performance review
 
+Historical review, 8 September 2026. Current account, 50 GB, 30-day retention, and scheduled-cleanup implementation supersedes the prototype limits below; see [launch readiness](launch-readiness.md) and the README for current evidence. This review does not certify the new account code.
+
 Reviewed 8 September 2026. Scope: the controlled, single-token file-transfer prototype. This is a code and configuration review with regression tests, not an independent penetration test or certification of OWASP ASVS compliance.
 
 ## Stack

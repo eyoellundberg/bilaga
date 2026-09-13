@@ -24,7 +24,7 @@ def main():
     request('/api/transfers',auth=False,expect=401)
     request('/api/transfers',headers={'Authorization':'Bearer wrong'},expect=401)
     request('/api/transfers','POST',{'filename':'empty.txt','size_bytes':0},expect=400)
-    quote,_=request('/api/quote?bytes=50000000000',auth=False);assert quote['estimated_price_usd']==5 and not quote['upload_allowed']
+    quote,_=request('/api/quote?bytes=50000000000',auth=False);assert quote['estimated_price_usd']==5 and quote['upload_allowed']
     payload=os.urandom(8*1024*1024+123)
     t,_=request('/api/transfers','POST',{'filename':'test-å-report.bin','size_bytes':len(payload)},expect=201)
     tid=t['id'];path='/api/transfers/'+tid
@@ -36,6 +36,8 @@ def main():
     request(path+'/parts/2','PUT',payload[t['part_size_bytes']:])
     status,_=request(path);assert len(status['parts'])==2
     ready,_=request(path+'/complete','POST');assert ready['charged_usd']==0
+    from datetime import datetime
+    assert (datetime.fromisoformat(ready['expires_at'].replace('Z','+00:00'))-datetime.fromisoformat(ready['completed_at'].replace('Z','+00:00'))).total_seconds()==30*86400
     again,_=request(path+'/complete','POST');assert again['expires_at']==ready['expires_at'] and again['share_url']==ready['share_url']
     link=ready['share_url'].replace(BASE,'')
     request(link,auth=False)
@@ -55,11 +57,15 @@ def main():
     path='/api/transfers/'+t['id'];request(path+'/parts/1','PUT',b'bye');ready,_=request(path+'/complete','POST')
     sql="UPDATE transfers SET expires_at=1 WHERE id='"+t['id']+"'"
     env=dict(os.environ,WRANGLER_LOG_PATH='.wrangler/logs')
-    subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config','wrangler.local.json','--persist-to','.wrangler/state','--command',sql],env=env,check=True,stdout=subprocess.DEVNULL)
+    subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config',os.environ.get('BILAGA_TEST_CONFIG','wrangler.local.json'),'--persist-to','.wrangler/state','--command',sql],env=env,check=True,stdout=subprocess.DEVNULL)
     download='/api/download/'+ready['share_url'].rsplit('/',1)[1]
     request(download,auth=False,expect=410)
     status,_=request(path);assert status['status']=='expired'
-    result,_=request('/api/cleanup','POST');assert result['removed']>=1
+    if os.environ.get('BILAGA_TEST_SCHEDULED'):
+        # Exercise the real scheduled handler without upload activity triggering cleanup.
+        request('/cdn-cgi/handler/scheduled',auth=False)
+    else:
+        result,_=request('/api/cleanup','POST');assert result['removed']>=1
     request(download,auth=False,expect=404)
     for page in ['/','/docs','/llms.txt','/bilaga.py']:request(page,auth=False)
     print(f'{checks} HTTP checks passed: multipart bytes, retries, authentication, completion, download ranges, status, deletion, expiry, cleanup, and documentation.')

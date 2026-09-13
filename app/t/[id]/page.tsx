@@ -1,11 +1,7 @@
-import {
-  Paperclip,
-  Download,
-  ArrowUpRight,
-  Clock,
-  File,
-  ShieldCheck,
-} from 'lucide-react';
+// Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
+/* oxlint-disable next/no-html-link-for-pages */
+import { Brand } from '@/app/brand';
+import { Download, ArrowUpRight, Clock, File, ShieldCheck } from 'lucide-react';
 import { publicTransfer } from '@/lib/service';
 import { fileLabel } from '@/lib/rules';
 export const dynamic = 'force-dynamic';
@@ -23,10 +19,7 @@ export default async function Recipient({
   return (
     <main className="recipient-shell">
       <header className="site-header">
-        <a className="brand" href="/">
-          <Paperclip size={27} />
-          bilaga<span className="brand-dot">.</span>
-        </a>
+        <Brand />
         <span className="small">A simple handoff.</span>
       </header>
       <section className="recipient-content">

@@ -1,0 +1,63 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bilaga-preview",
+  "account_id": "e4cac7408d3b1196317da151156a1055",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "no_bundle": true,
+  "rules": [
+    {
+      "type": "ESModule",
+      "globs": [
+        "**/*.js",
+        "**/*.mjs"
+      ]
+    }
+  ],
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS"
+  },
+  "workers_dev": true,
+  "triggers": {
+    "crons": [
+      "*/15 * * * *"
+    ]
+  },
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bilaga-preview",
+      "database_id": "5ddcf084-8038-4e5f-9ce4-7f8aac3e0fe0",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "bilaga-preview-files"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "bilaga.link",
+      "custom_domain": true,
+      "zone_id": "29c584325f34170013e1e729ab5f4c65"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": [
+        "login@bilaga.link"
+      ]
+    }
+  ],
+  "vars": {
+    "AUTH_ORIGIN": "https://bilaga.link"
+  }
+}
