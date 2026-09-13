@@ -13,10 +13,6 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
-        <footer className="shell policy-footer">
-          <a href="/privacy">Privacy</a>
-          <a href="/terms">Terms</a>
-        </footer>
       </body>
     </html>
   );

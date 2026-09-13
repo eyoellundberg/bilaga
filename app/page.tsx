@@ -16,7 +16,6 @@ export default function Home() {
         <WaitlistForm />
         <div className="facts"><span>No recipient account</span><span>No subscription</span></div>
       </section>
-      <footer><span>bilaga <span className="muted">/ Swedish for attachment.</span></span><a href="/account">Preview sign-in</a></footer>
     </main>
   );
 }
