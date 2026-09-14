@@ -41,6 +41,17 @@ def main():
     again,_=request(path+'/complete','POST');assert again['expires_at']==ready['expires_at'] and again['share_url']==ready['share_url']
     link=ready['share_url'].replace(BASE,'')
     request(link,auth=False)
+    # Receipt: chunked content hash matches the payload; signature verifies offline when a key is configured.
+    part=t['part_size_bytes'];expected=hashlib.sha256(b''.join(hashlib.sha256(payload[i:i+part]).digest() for i in range(0,len(payload),part))).hexdigest()
+    assert ready['content_hash']==expected
+    public_id=link.rsplit('/',1)[1]
+    if config.get('receipts')=='signed_ed25519':
+        signed,_=request('/api/receipts/'+public_id,auth=False);key,_=request('/api/receipt-key',auth=False)
+        assert signed['receipt']['content_hash']==expected and signed['key_id']==key['key_id'] and len(signed['signature_hex'])==128
+        verify=subprocess.run(['python3','public/bilaga.py','--base',BASE,'--receipt',public_id],capture_output=True,text=True)
+        assert verify.returncode==0 and json.loads(verify.stdout)['verified'],verify.stdout[-300:]+verify.stderr[-300:]
+    else:
+        request('/api/receipts/'+public_id,auth=False,expect=503)
     download='/api/download/'+link.rsplit('/',1)[1]
     _,rh=request(download,'HEAD',auth=False);assert int(rh['Content-Length'])==len(payload)
     status,_=request(path);assert status['download_requests']==0

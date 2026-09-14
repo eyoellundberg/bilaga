@@ -44,7 +44,7 @@ The account page handles login fragments at mount and during existing-tab naviga
 - Complete full-size local testing, then separately validate real Cloudflare/R2 reliability, representative connections, interruption/network failure and lost response recovery, throughput and Worker resource limits. Local emulator success is not production load certification.
 - Confirm an R2 lifecycle rule that aborts orphan multipart allocations; test cleanup failures/backlogs and operational alerting. Scheduled cleanup is bounded and cannot promise immediate physical deletion. Confirm storage budgets, edge/global abuse limits, monitoring and incident response.
 - Decide the public content/scanning/quarantine policy; current preview files are opaque and unscanned. Define a process for takedowns and malicious files.
-- Before paid uploads: implement idempotent Stripe payment confirmation, durable dollar ledger with per-purchase 24-month expiry, atomic credit reservation/release, completed-transfer charging, refunds/withdrawal/unused-credit/account-deletion handling, tax disclosures, and support. New accounts remain upload-gated; never bypass this gate for unrestricted paid access.
+- Before paid uploads: implement idempotent Stripe payment confirmation, durable dollar ledger with per-purchase 24-month expiry, atomic credit reservation/release, completed-transfer charging, refunds/withdrawal/unused-credit/account-deletion handling, tax disclosures, and support. Free-tier limits and signup throttles replace the manual upload gate; paid access must still check balance before raising limits.
 
 ## Sources for policy / provider review
 
@@ -55,6 +55,12 @@ Cloudflare [native email Workers API](https://developers.cloudflare.com/email-se
 Removed the agent-name field; new tokens receive an automatic label, and agent access is in an expandable section beneath credit information. Credit balances and refill remain unimplemented; the page states that payments are unavailable. Owner confirmed real sign-in, but Gmail placed the message in junk. Wrangler confirms sending remains enabled; public DNS has one return-path SPF record, the configured DKIM selector and a DMARC reject policy. Owner-provided Gmail headers confirm SPF PASS, DKIM PASS for both bilaga.link and cloudflare-smtp.org, and aligned DMARC PASS. TLS 1.3 was used. Authentication failure is ruled out for that message; Gmail’s exact junk-classification cause is not exposed. Reputation/content filtering remains possible, not established. No speculative DNS changes were made.
 
 Account simplification deployed as Worker version 2cf344be-7a68-49f2-9c65-ce2f3c28dfa0. Build, lint, and TypeScript passed.
+
+## Free tier, signed receipts, recipient loop — 14 September 2026 (local, not deployed)
+
+New accounts are self-serve on a free tier (1 GB, 5/day, 1 pending, 2 GB stored, 7-day access); uploads_enabled=1 keeps full limits. Signup is throttled per IP (5/day) and per email domain (50/day). Completion stores a chunked content hash; GET /api/receipts/{public_id} returns an Ed25519-signed receipt and GET /api/receipt-key the public key. The Python client verifies receipts and files offline (pure-Python Ed25519, cross-checked against Node's signer). The download page links the receipt and invites recipients to send a file back.
+
+Verified locally: build, lint, TypeScript, client tests, Python verifier against a Node-generated signature. Not yet run: HTTP suites (Wrangler was unavailable in the authoring session). Before deploying: apply migration 0004, set RECEIPT_SIGNING_KEY, run tests/integration.py and tests/accounts.py locally with the same key in .env, and smoke-test a free-tier account on bilaga.link.
 
 ## Waitlist starter — 13 September 2026
 

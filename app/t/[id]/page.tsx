@@ -1,7 +1,15 @@
 // Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
 /* oxlint-disable next/no-html-link-for-pages */
 import { Brand } from '@/app/brand';
-import { Download, ArrowUpRight, Clock, File, ShieldCheck } from 'lucide-react';
+import {
+  Download,
+  ArrowUpRight,
+  Clock,
+  File,
+  ShieldCheck,
+  FileCheck,
+  Reply,
+} from 'lucide-react';
 import { publicTransfer } from '@/lib/service';
 import { fileLabel } from '@/lib/rules';
 export const dynamic = 'force-dynamic';
@@ -80,6 +88,13 @@ export default async function Recipient({
             <p className="small recipient-note">
               Only download files from senders you trust.
             </p>
+            {transfer.content_hash && (
+              <p className="small recipient-note">
+                <FileCheck size={14} />{' '}
+                <a href={`/api/receipts/${id}`}>Signed receipt</a> · content
+                hash <code>{transfer.content_hash.slice(0, 16)}…</code>
+              </p>
+            )}
           </div>
         ) : (
           <a className="download-action unavailable-action" href="/">
@@ -93,10 +108,22 @@ export default async function Recipient({
             : 'Ask the sender for a new link.'}
         </p>
       </section>
+      {transfer && (
+        <section className="recipient-reply">
+          <p className="eyebrow">NEED TO SEND SOMETHING BACK?</p>
+          <p>
+            Sign in with your email, connect your agent, and it can send a file
+            in minutes. Free for files up to 1 GB.
+          </p>
+          <a className="text-link" href="/account">
+            <Reply size={16} /> Send a file back <ArrowUpRight size={16} />
+          </a>
+        </section>
+      )}
       <footer>
         <span>Delivered with Bilaga.</span>
-        <a href="/">
-          Send a file with your agent <ArrowUpRight size={14} />
+        <a href="/docs">
+          Connect your agent <ArrowUpRight size={14} />
         </a>
       </footer>
     </main>

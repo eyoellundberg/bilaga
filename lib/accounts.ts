@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { sha256 } from './hash';
 import { bodyJson, fail, json } from './http';
-import { DAY } from './rules';
+import { DAY, TIERS, describeLimits } from './rules';
 
 const db = () => env.DB;
 const random = () =>
@@ -80,7 +80,7 @@ export async function tokenOwner(tokenHash: string) {
 export async function accountRoutes(
   req: Request,
   path: string[],
-  limit: (scope: string, count: number) => Promise<void>,
+  limit: (scope: string, count: number, window?: number) => Promise<void>,
 ): Promise<Response | null> {
   if (!['auth', 'account'].includes(path[0])) return null;
   const route = path.join('/');
@@ -125,6 +125,16 @@ export async function accountRoutes(
       return fail(400, 'invalid_email', 'Enter a valid email address.');
     await limit(`login-email:${await hash(email)}`, 1);
     await limit('login-global', 30);
+    // Daily signup throttles: self-serve free accounts must not be mintable in bulk.
+    const ip = await hash(req.headers.get('CF-Connecting-IP') || 'local');
+    const known = await db()
+      .prepare('SELECT 1 FROM accounts WHERE email=? AND deleted_at IS NULL')
+      .bind(email)
+      .first();
+    if (!known) {
+      await limit(`signup-ip-day:${ip}`, 5, DAY);
+      await limit(`signup-domain-day:${await hash(email.split('@')[1])}`, 50, DAY);
+    }
     const token = random(),
       browser = random(),
       tokenHash = await hash(token);
@@ -241,6 +251,7 @@ export async function accountRoutes(
     return json({
       email: account.email,
       uploads_enabled: !!account.uploads_enabled,
+      limits: describeLimits(account.uploads_enabled ? TIERS.full : TIERS.free),
       billing: 'not_available',
       tokens,
     });

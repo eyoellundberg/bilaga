@@ -6,8 +6,16 @@ import { Brand } from '../brand';
 type Account = {
   email: string;
   uploads_enabled: boolean;
+  limits: {
+    tier: 'free' | 'full';
+    max_file_bytes: number;
+    max_stored_bytes: number;
+    max_daily_transfers: number;
+    retention_days: number;
+  };
   tokens: { id: string; label: string; created_at: number }[];
 };
+const gb = (bytes: number) => `${bytes / 1e9} GB`;
 export default function AccountPage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [email, setEmail] = useState('');
@@ -151,12 +159,15 @@ export default function AccountPage() {
             </p>
             <p className="notice">
               {account.uploads_enabled
-                ? 'Private preview access is enabled. Transfers are free while payments are being prepared.'
-                : 'Your account is ready. Uploads will become available when payments launch. We’ll let you add credit here when payments are available.'}
+                ? `Full preview access: files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.retention_days} days to download. Transfers are free while payments are being prepared.`
+                : `Free account: files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.max_daily_transfers} transfers a day, ${gb(account.limits.max_stored_bytes)} stored, ${account.limits.retention_days} days to download. Your agent can send a file right now.`}
             </p>
             <section>
               <h2>Credit</h2>
-              <p>Credit top-ups are coming soon. Payments are not available during the private preview.</p>
+              <p>
+                Free transfers need no credit. Paid top-ups for larger files
+                and 30-day links are coming soon.
+              </p>
             </section>
             <details>
               <summary>Agent access</summary>

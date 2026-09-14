@@ -1,0 +1,1 @@
+ALTER TABLE `transfers` ADD `content_hash` text;

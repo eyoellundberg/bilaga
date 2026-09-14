@@ -3,5 +3,6 @@ declare namespace Cloudflare {
     DB: D1Database;
     FILES: R2Bucket;
     BILAGA_TOKEN_HASH?: string;
+    RECEIPT_SIGNING_KEY?: string;
   }
 }

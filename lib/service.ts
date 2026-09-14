@@ -6,16 +6,23 @@ import { env } from 'cloudflare:workers';
 import {
   MAX_BYTES,
   PART_BYTES,
-  RETENTION,
   DAY,
-  MAX_STORED_BYTES,
-  MAX_PENDING_UPLOADS,
-  MAX_DAILY_TRANSFERS,
+  TIERS,
+  type Limits,
+  describeLimits,
+  fileLabel,
   quoteCents,
   validSize,
   cleanFilename,
   contentDisposition,
 } from './rules';
+import {
+  CONTENT_HASH_ALGORITHM,
+  RECEIPT_VERSION,
+  contentHash,
+  publicKeyInfo,
+  signReceipt,
+} from './receipts';
 
 type Transfer = {
   id: string;
@@ -34,6 +41,7 @@ type Transfer = {
   last_download_at: number | null;
   purged_at: number | null;
   completion_lock_until: number;
+  content_hash: string | null;
 };
 type Part = {
   number: number;
@@ -67,9 +75,9 @@ async function authorize(req: Request) {
     return fail(401, 'unauthorized', 'A valid Bilaga token is required.');
   return owner;
 }
-async function rateLimit(scope: string, limit: number) {
+async function rateLimit(scope: string, limit: number, window = 60_000) {
   const now = Date.now(),
-    reset = now + 60_000;
+    reset = now + window;
   const row = await db()
     .prepare(`INSERT INTO rate_limits (scope,hits,reset_at) VALUES (?,1,?)
     ON CONFLICT(scope) DO UPDATE SET hits=CASE WHEN reset_at<=? THEN 1 ELSE hits+1 END,
@@ -83,6 +91,16 @@ async function rateLimit(scope: string, limit: number) {
       'rate_limited',
       'Too many requests. Wait a minute before retrying.',
     );
+}
+// Owner test tokens and hand-enabled accounts get full limits; everyone else is free tier.
+async function limitsFor(owner: string): Promise<Limits> {
+  if (owner.length === 64) return TIERS.full;
+  const account = await db()
+    .prepare('SELECT uploads_enabled FROM accounts WHERE id=? AND deleted_at IS NULL')
+    .bind(owner)
+    .first<{ uploads_enabled: number }>();
+  if (!account) return fail(401, 'unauthorized', 'A valid Bilaga token is required.');
+  return account.uploads_enabled ? TIERS.full : TIERS.free;
 }
 async function owned(id: string, owner: string) {
   const t = await db()
@@ -128,6 +146,12 @@ function privateData(t: Transfer, origin: string) {
     download_note:
       'Requests indicate a download was started, not completed or read.',
     share_url: t.state === 'complete' ? `${origin}/t/${t.public_id}` : null,
+    receipt_url:
+      t.state === 'complete' && t.content_hash
+        ? `${origin}/api/receipts/${t.public_id}`
+        : null,
+    content_hash: t.content_hash,
+    content_hash_algorithm: t.content_hash ? CONTENT_HASH_ALGORITHM : null,
     estimated_price_usd: quoteCents(t.size) / 100,
     charged_usd: 0,
     billing: 'preview_no_charge',
@@ -198,7 +222,36 @@ export async function publicTransfer(id: string) {
     .bind(id)
     .first<Transfer>();
   if (!t || t.state !== 'complete' || t.expires_at <= Date.now()) return null;
-  return publicData(t);
+  return { ...publicData(t), public_id: t.public_id, content_hash: t.content_hash };
+}
+// Receipts stay verifiable after expiry. Deleted transfers are redacted and get none.
+async function receipt(id: string) {
+  const t = await db()
+    .prepare('SELECT * FROM transfers WHERE public_id=?')
+    .bind(id)
+    .first<Transfer>();
+  if (!t || t.state !== 'complete' || !t.content_hash)
+    return fail(404, 'not_found', 'No receipt is available for this transfer.');
+  const signed = await signReceipt({
+    version: RECEIPT_VERSION,
+    issuer: 'bilaga.link',
+    transfer: t.public_id,
+    filename: t.filename,
+    size_bytes: t.size,
+    part_size_bytes: PART_BYTES,
+    content_hash: t.content_hash,
+    content_hash_algorithm: CONTENT_HASH_ALGORITHM,
+    sender: t.sender,
+    completed_at: iso(t.completed_at),
+    expires_at: iso(t.expires_at),
+    sent_reported_at: iso(t.sent_at),
+    download_requests: t.download_requests,
+    last_download_requested_at: iso(t.last_download_at),
+    issued_at: new Date().toISOString(),
+  });
+  if (!signed)
+    return fail(503, 'receipts_unavailable', 'Receipt signing is not configured.');
+  return json(signed);
 }
 async function download(req: Request, id: string) {
   const t = await db()
@@ -321,12 +374,10 @@ export async function handleApi(req: Request) {
     if (p.length === 1 && p[0] === 'config' && method === 'GET')
       return json({
         mode: 'private_preview',
-        max_file_bytes: MAX_BYTES,
-        max_stored_bytes: MAX_STORED_BYTES,
-        max_pending_uploads: MAX_PENDING_UPLOADS,
-        max_daily_transfers: MAX_DAILY_TRANSFERS,
+        ...describeLimits(TIERS.full),
+        tiers: { free: describeLimits(TIERS.free), full: describeLimits(TIERS.full) },
         part_size_bytes: PART_BYTES,
-        retention_days: 30,
+        receipts: (await publicKeyInfo()) ? 'signed_ed25519' : 'unavailable',
         billing: 'preview_no_charge',
         auth: 'magic_link_and_bearer_token',
         signals: 'polling',
@@ -346,9 +397,24 @@ export async function handleApi(req: Request) {
         currency: 'USD',
         charged_usd: 0,
         upload_allowed: bytes <= MAX_BYTES,
+        free_tier_allowed: bytes <= TIERS.free.max_file_bytes,
         max_file_bytes: MAX_BYTES,
         billing: 'preview_no_charge',
       });
+    }
+    if (p.length === 1 && p[0] === 'receipt-key' && method === 'GET') {
+      const info = await publicKeyInfo();
+      if (!info) return fail(503, 'receipts_unavailable', 'Receipt signing is not configured.');
+      return json({ ...info, issuer: 'bilaga.link', content_hash_algorithm: CONTENT_HASH_ALGORITHM });
+    }
+    if (
+      p.length === 2 &&
+      p[0] === 'receipts' &&
+      /^[a-f0-9]{32}$/.test(p[1] || '') &&
+      method === 'GET'
+    ) {
+      await rateLimit(`receipt:${p[1]}`, 60);
+      return await receipt(p[1]);
     }
     if (
       p.length === 2 &&
@@ -367,20 +433,7 @@ export async function handleApi(req: Request) {
     if (p[0] !== 'transfers')
       return fail(404, 'not_found', 'Endpoint not found.');
     if (p.length === 1 && method === 'POST') {
-      if (owner.length === 32) {
-        const allowed = await db()
-          .prepare(
-            'SELECT id FROM accounts WHERE id=? AND deleted_at IS NULL AND uploads_enabled=1',
-          )
-          .bind(owner)
-          .first();
-        if (!allowed)
-          return fail(
-            403,
-            'uploads_pending',
-            'Account uploads are not enabled yet. Payments are still being prepared.',
-          );
-      }
+      const limits = await limitsFor(owner);
       if (
         req.headers.get('Content-Type')?.split(';')[0].trim() !==
         'application/json'
@@ -394,6 +447,12 @@ export async function handleApi(req: Request) {
           400,
           'invalid_size',
           'Files must be between 1 byte and 50 GB.',
+        );
+      if (body.size_bytes > limits.max_file_bytes)
+        return fail(
+          413,
+          'tier_limit',
+          `Free accounts accept files up to ${fileLabel(limits.max_file_bytes)}. Larger transfers need a full account.`,
         );
       let filename: string;
       try {
@@ -418,7 +477,7 @@ export async function handleApi(req: Request) {
       const reservation = await db()
         .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,state,created_at,expires_at)
       SELECT ?,?,?,?,?,?,'initializing',?,? WHERE
-      (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL AND uploads_enabled=1)) AND
+      (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)) AND
       (SELECT count(*) FROM transfers WHERE owner=? AND created_at>?) < ? AND
       (SELECT count(*) FROM transfers WHERE owner=? AND state IN ('initializing','uploading','completing') AND purged_at IS NULL) < ? AND
       COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ? RETURNING id`)
@@ -435,19 +494,19 @@ export async function handleApi(req: Request) {
           owner,
           owner,
           now - DAY,
-          MAX_DAILY_TRANSFERS,
+          limits.max_daily_transfers,
           owner,
-          MAX_PENDING_UPLOADS,
+          limits.max_pending_uploads,
           owner,
           body.size_bytes,
-          MAX_STORED_BYTES,
+          limits.max_stored_bytes,
         )
         .first();
       if (!reservation)
         return fail(
           429,
           'preview_limit',
-          'Preview limit reached: 100 transfers per day, 3 unfinished uploads, or 100 GB reserved storage.',
+          `Limit reached for your ${limits.tier} account: ${limits.max_daily_transfers} transfers per day, ${limits.max_pending_uploads} unfinished upload${limits.max_pending_uploads === 1 ? '' : 's'}, or ${fileLabel(limits.max_stored_bytes)} reserved storage.`,
         );
       let multi: R2MultipartUpload | undefined;
       try {
@@ -614,11 +673,16 @@ export async function handleApi(req: Request) {
           'Stored file size did not match the declared size.',
         );
       const now = Date.now();
+      const hashes = parts.map((p) => p.content_hash);
+      const digest = hashes.every((h): h is string => !!h)
+        ? await contentHash(hashes)
+        : null;
+      const limits = await limitsFor(owner);
       await db()
         .prepare(
-          "UPDATE transfers SET state='complete',completed_at=?,expires_at=?,upload_id=NULL WHERE id=? AND state IN ('uploading','completing')",
+          "UPDATE transfers SET state='complete',completed_at=?,expires_at=?,upload_id=NULL,content_hash=? WHERE id=? AND state IN ('uploading','completing')",
         )
-        .bind(now, now + RETENTION, t.id)
+        .bind(now, now + limits.retention_ms, digest, t.id)
         .run();
       t = await owned(t.id, owner);
       // Deletion can race completion; never revive a revoked transfer or keep its bytes.

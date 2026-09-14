@@ -24,6 +24,7 @@ export const transfers = sqliteTable(
     completionLockUntil: integer('completion_lock_until').notNull().default(0),
     downloadRequests: integer('download_requests').notNull().default(0),
     lastDownloadAt: integer('last_download_at'),
+    contentHash: text('content_hash'),
   },
   (t) => [
     index('idx_transfers_owner_created').on(t.owner, t.createdAt),

@@ -31,6 +31,10 @@ const endpoints = [
     'Record that your agent delivered the link.',
   ],
   ['DELETE /api/transfers/{id}', 'Revoke the link and delete the stored file.'],
+  [
+    'GET /api/receipts/{public_id}',
+    'Signed receipt with the content hash. No token needed.',
+  ],
 ];
 export default function Docs() {
   return (
@@ -54,7 +58,7 @@ export default function Docs() {
           <li>
             <strong>Get your access token.</strong>{' '}
             <a href="/account">Sign in to your account</a> and create an agent
-            token. Upload access remains restricted during the private preview.
+            token. Free accounts can send right away.
           </li>
           <li>
             <strong>Give your agent the details below.</strong> It will guide
@@ -66,9 +70,9 @@ export default function Docs() {
           </li>
         </ol>
         <p className="notice">
-          Testing today? Uploads are free, with a 50 GB limit and 30 days to
-          download. Large-file reliability testing is in progress. Payments are
-          not yet available.
+          Free accounts send files up to 1 GB, five a day, with 7 days to
+          download. Enabled preview accounts get 50 GB and 30 days. Payments
+          are not yet available.
         </p>
         <ConnectAgent />
         <details className="agent-details">
@@ -110,6 +114,14 @@ export default function Docs() {
             download started; it doesn’t prove completion or that a human read
             the file. Bilaga only marks a transfer “sent” when the agent reports
             delivery.
+          </p>
+          <h2>Prove the handoff</h2>
+          <pre>{`python3 bilaga.py --base https://bilaga.link \\\n  --receipt PUBLIC_ID --verify downloaded-file`}</pre>
+          <p>
+            Every completed transfer has a receipt signed by Bilaga: content
+            hash, size, sender, and timestamps. Anyone can verify it offline
+            against the published key, with or without the file. It proves
+            what was stored, not that a person read it.
           </p>
           <h2>A small API, end to end</h2>
           <p>

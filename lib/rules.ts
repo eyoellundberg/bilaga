@@ -5,6 +5,44 @@ export const RETENTION = 30 * DAY;
 export const MAX_STORED_BYTES = 100_000_000_000;
 export const MAX_PENDING_UPLOADS = 3;
 export const MAX_DAILY_TRANSFERS = 100;
+export type Tier = 'free' | 'full';
+export type Limits = {
+  tier: Tier;
+  max_file_bytes: number;
+  retention_ms: number;
+  max_stored_bytes: number;
+  max_daily_transfers: number;
+  max_pending_uploads: number;
+};
+// Free accounts are self-serve and need no approval. Full accounts are enabled by hand.
+export const TIERS: Record<Tier, Limits> = {
+  free: {
+    tier: 'free',
+    max_file_bytes: 1_000_000_000,
+    retention_ms: 7 * DAY,
+    max_stored_bytes: 2_000_000_000,
+    max_daily_transfers: 5,
+    max_pending_uploads: 1,
+  },
+  full: {
+    tier: 'full',
+    max_file_bytes: MAX_BYTES,
+    retention_ms: RETENTION,
+    max_stored_bytes: MAX_STORED_BYTES,
+    max_daily_transfers: MAX_DAILY_TRANSFERS,
+    max_pending_uploads: MAX_PENDING_UPLOADS,
+  },
+};
+export function describeLimits(l: Limits) {
+  return {
+    tier: l.tier,
+    max_file_bytes: l.max_file_bytes,
+    max_stored_bytes: l.max_stored_bytes,
+    max_pending_uploads: l.max_pending_uploads,
+    max_daily_transfers: l.max_daily_transfers,
+    retention_days: Math.round(l.retention_ms / DAY),
+  };
+}
 export function quoteCents(bytes: number) {
   return Math.max(25, Math.ceil((bytes / 1_000_000_000) * 10));
 }
@@ -31,7 +69,7 @@ export function cleanFilename(value: unknown): string {
     .normalize('NFC')
     // Strip control characters deliberately: filenames must be safe in headers and UI.
     // oxlint-disable-next-line no-control-regex
-    .replace(/[\x00-\x1f\x7f/\\\u202a-\u202e\u2066-\u2069]/g, '_')
+    .replace(/[\x00-\x1f\x7f/\\‪-‮⁦-⁩]/g, '_')
     .trim();
   if (
     !name ||

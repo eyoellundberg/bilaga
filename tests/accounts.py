@@ -39,17 +39,26 @@ a = login('first-'+secrets.token_hex(4)+'@example.invalid')
 b = login('second-'+secrets.token_hex(4)+'@example.invalid')
 account,_=call('account',cookie=a)
 email=account['email']
-assert not account['uploads_enabled']
+assert not account['uploads_enabled'] and account['limits']['tier']=='free' and account['limits']['retention_days']==7
 token,_=call('account/tokens','POST',{'label':'Synthetic agent'},cookie=a,expect=201)
 assert 'token' in token
 rows=sql(f"SELECT hash FROM api_tokens WHERE id='{token['id']}'")
 assert rows[0]['hash']==digest(token['token'])
-request('/api/transfers','POST',{'filename':'blocked.txt','size_bytes':1},headers={'Authorization':'Bearer '+token['token']},expect=403)
+# Free tier is self-serve: small files work immediately, oversize files are refused, retention is 7 days.
+request('/api/transfers','POST',{'filename':'too-big.bin','size_bytes':1_000_000_001},headers={'Authorization':'Bearer '+token['token']},expect=413)
+free,_=request('/api/transfers','POST',{'filename':'free.txt','size_bytes':2},headers={'Authorization':'Bearer '+token['token']},expect=201)
+request('/api/transfers','POST',{'filename':'second-pending.txt','size_bytes':2},headers={'Authorization':'Bearer '+token['token']},expect=429)
+request('/api/transfers/'+free['id']+'/parts/1','PUT',b'ok',headers={'Authorization':'Bearer '+token['token']})
+free_done,_=request('/api/transfers/'+free['id']+'/complete','POST',headers={'Authorization':'Bearer '+token['token']})
+from datetime import datetime as _dt
+assert (_dt.fromisoformat(free_done['expires_at'].replace('Z','+00:00'))-_dt.fromisoformat(free_done['completed_at'].replace('Z','+00:00'))).total_seconds()==7*86400
+assert free_done['content_hash'] and free_done['receipt_url']
+request('/api/transfers/'+free['id'],'DELETE',headers={'Authorization':'Bearer '+token['token']})
 call('account/tokens/'+token['id'],'DELETE',cookie=b)
 request('/api/transfers',headers={'Authorization':'Bearer '+token['token']})
 call('account','DELETE',{'confirmation':email},cookie='',expect=401)
 call('account','DELETE',{'confirmation':'wrong'},cookie=a,expect=400)
-# Explicitly enable this synthetic account locally; public accounts remain gated.
+# Hand-enabled accounts get full limits.
 owner=sql(f"SELECT id FROM accounts WHERE email='{email}'")[0]['id']
 sql(f"UPDATE accounts SET uploads_enabled=1 WHERE id='{owner}'")
 t,_=request('/api/transfers','POST',{'filename':'account-file.txt','size_bytes':3},headers={'Authorization':'Bearer '+token['token']},expect=201)

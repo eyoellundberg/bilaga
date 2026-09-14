@@ -851,3 +851,7 @@ footer {
 .waitlist-form .small { margin-top: 12px; color: var(--muted-foreground); font-size: 13px; }
 .waitlist-success { padding: 22px; background: white; border: 1px solid var(--border); border-radius: 12px; }
 @media (max-width: 540px) { .waitlist-fields { flex-direction: column; } .waitlist-hero { padding-top: 42px; } }
+
+.recipient-reply { width: 100%; max-width: 560px; margin: 8px auto 32px; padding: 20px 24px; border: 1px solid var(--border); border-radius: 16px; }
+.recipient-reply p { margin: 6px 0 12px; }
+.recipient-note code { font-size: 0.85em; }
