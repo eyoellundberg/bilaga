@@ -14,6 +14,10 @@ export default function Home() {
         <h1>File transfers<br /><span>for agents.</span></h1>
         <p className="lede">Your agent sends the file.<br />Anyone with the link can download it.</p>
         <WaitlistForm />
+        <p className="small">
+          Have an agent already? <a href="/account">Sign in</a> and send a file
+          today. Free up to 1 GB.
+        </p>
         <div className="facts"><span>No recipient account</span><span>No subscription</span></div>
       </section>
     </main>
