@@ -287,18 +287,18 @@ h1 span {
   font-weight: 500;
   letter-spacing: -0.2px;
 }
-.tier .tier-price span {
-  font-size: 13px;
-  letter-spacing: 0;
-  color: var(--muted-foreground);
-  margin-left: 4px;
-}
 .tier .tier-price {
   color: var(--foreground);
   font-size: 38px;
   letter-spacing: -1.5px;
   line-height: 1;
   margin: 2px 0 6px;
+}
+.tier .tier-price span {
+  font-size: 13px;
+  letter-spacing: 0;
+  color: var(--muted-foreground);
+  margin-left: 4px;
 }
 .tier p {
   font-size: 14px;
@@ -355,7 +355,6 @@ footer {
   h1 {
     font-size: 43px;
   }
-
 }
 @media (max-width: 720px) {
   .shell {

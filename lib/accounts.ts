@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { sha256 } from './hash';
 import { bodyJson, fail, json } from './http';
-import { DAY, TOP_UP_CENTS, describeLimits } from './rules';
+import { DAY, describeLimits } from './rules';
 import { createCheckout, stripeConfigured } from './stripe';
 
 const db = () => env.DB;
@@ -389,16 +389,13 @@ export async function accountRoutes(
       last_login_method: account.last_login_method,
       limits: describeLimits(),
       top_ups: stripeConfigured() ? 'stripe_checkout' : 'unavailable',
-      top_up_cents: [...TOP_UP_CENTS],
       tokens,
     });
   }
   if (route === 'account/topup' && method === 'POST') {
     await limit(`topup:${account.id}`, 10);
     const body = await bodyJson(req);
-    const amount = body?.amount_cents;
-    if (!(TOP_UP_CENTS as readonly number[]).includes(amount))
-      return fail(400, 'invalid_amount', 'Choose Plus ($15) or Pro ($30).');
+    const amount = Number(body?.amount_cents);
     const session = await createCheckout(account.id, amount, origin);
     return json({ url: session.url, amount_cents: amount });
   }

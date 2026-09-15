@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { fail } from './http';
-import { topUpPack } from './rules';
+import { CREDIT_VALIDITY_YEARS, CURRENT_OFFER, choosePackMessage, topUpPack, usd } from './rules';
 
 // Stripe Checkout without the SDK: two REST calls and one HMAC. The secret key
 // creates sessions; the webhook secret authenticates Stripe's callback.
@@ -11,7 +11,7 @@ export const stripeConfigured = () =>
 
 export async function createCheckout(accountId: string, amountCents: number, origin: string) {
   const pack = topUpPack(amountCents);
-  if (!pack) return fail(400, 'invalid_amount', 'Choose Plus ($15) or Pro ($30).');
+  if (!pack) return fail(400, 'invalid_amount', choosePackMessage());
   const key = settings().STRIPE_SECRET_KEY;
   if (!key || !settings().STRIPE_WEBHOOK_SECRET)
     return fail(503, 'payments_unavailable', 'Card top-ups are not configured.');
@@ -23,8 +23,8 @@ export async function createCheckout(accountId: string, amountCents: number, ori
     'line_items[0][quantity]': '1',
     'metadata[account_id]': accountId,
     'metadata[amount_cents]': String(amountCents),
-    'metadata[offer]': 'packs_2026_09',
-    'line_items[0][price_data][product_data][description]': `$${pack.credit_cents / 100} of transfer credit, up to ${pack.up_to_gb} GB. One-time payment, valid for 3 years.`,
+    'metadata[offer]': CURRENT_OFFER,
+    'line_items[0][price_data][product_data][description]': `${usd(pack.credit_cents)} of transfer credit, up to ${pack.up_to_gb} GB. One-time payment, valid for ${CREDIT_VALIDITY_YEARS} years.`,
     success_url: `${origin}/account#topup=ok`,
     cancel_url: `${origin}/account#topup=cancelled`,
   });

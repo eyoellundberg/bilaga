@@ -1,4 +1,5 @@
 'use client';
+import { gbLabel } from '@/lib/rules';
 /* oxlint-disable next/no-html-link-for-pages */
 import { useEffect, useState } from 'react';
 import { Brand } from '../brand';
@@ -18,12 +19,14 @@ type Account = {
     free_stored_bytes: number;
     free_transfers_per_30_days: number;
     retention_days: number;
+    price_cents_per_gb: number;
+    minimum_charge_cents: number;
+    top_up_packs: { name: string; amount_cents: number; credit_cents: number; up_to_gb: number }[];
+    credit_validity_years: number;
   };
   top_ups: 'stripe_checkout' | 'unavailable';
-  top_up_cents: number[];
   tokens: { id: string; label: string; created_at: number }[];
 };
-const gb = (bytes: number) => `${bytes / 1e9} GB`;
 export default function AccountPage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [email, setEmail] = useState('');
@@ -203,7 +206,7 @@ export default function AccountPage() {
               Signed in as <strong>{account.email}</strong>.
             </p>
             <p className="notice">
-              {`Free: ${gb(account.limits.free_stored_bytes)} stored and ${account.limits.free_transfers_per_30_days} transfers per 30 days, files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.retention_days} days to download. Beyond that, $0.10 per GB ($0.25 minimum) from your balance, up to ${gb(account.limits.max_stored_bytes)} stored.`}
+              {`Free: ${gbLabel(account.limits.free_stored_bytes)} stored and ${account.limits.free_transfers_per_30_days} transfers per 30 days, files up to ${gbLabel(account.limits.max_file_bytes)}, ${account.limits.retention_days} days to download. Beyond that, $${(account.limits.price_cents_per_gb / 100).toFixed(2)} per GB ($${(account.limits.minimum_charge_cents / 100).toFixed(2)} minimum) from your balance, up to ${gbLabel(account.limits.max_stored_bytes)} stored.`}
             </p>
             <section>
               <h2>Your handle</h2>
@@ -227,25 +230,24 @@ export default function AccountPage() {
               <h2>Balance</h2>
               <p>
                 <strong>${(account.balance_cents / 100).toFixed(2)}</strong> in credit.
-                Transfers beyond your free allowance cost $0.10 per GB ($0.25 minimum) from this balance.
-                Plus is $15 for $15 of credit; Pro is $30 for $40. Paid once, valid for 3 years.
+                {` ${account.limits.top_up_packs.map((p) => `${p.name} is $${p.amount_cents / 100} for $${p.credit_cents / 100} of credit (up to ${p.up_to_gb} GB)`).join('; ')}. Paid once, valid for ${account.limits.credit_validity_years} years, never a subscription.`}
               </p>
               {account.top_ups === 'stripe_checkout' ? (
                 <p>
-                  {account.top_up_cents.map((cents) => (
+                  {account.limits.top_up_packs.map((pack) => (
                     <button
-                      key={cents}
+                      key={pack.amount_cents}
                       className="account-button"
                       disabled={busy}
                       style={{ marginRight: 8 }}
                       onClick={() =>
                         act(async () => {
-                          const { url } = await api<{ url: string }>('account/topup', 'POST', { amount_cents: cents });
+                          const { url } = await api<{ url: string }>('account/topup', 'POST', { amount_cents: pack.amount_cents });
                           location.assign(url);
                         })
                       }
                     >
-                      {cents === 3000 ? 'Pro · $30' : 'Plus · $15'}
+                      {`${pack.name} · $${pack.amount_cents / 100}`}
                     </button>
                   ))}
                 </p>

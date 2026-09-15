@@ -6,7 +6,10 @@ export { json } from './http';
 import { sha256 } from './hash';
 import { env } from 'cloudflare:workers';
 import {
+  CURRENT_OFFER,
+  describePacks,
   topUpPack,
+  usd,
   MAX_BYTES,
   PART_BYTES,
   DAY,
@@ -564,10 +567,11 @@ export async function handleApi(req: Request) {
       const amount = session.amount_total ?? 0;
       if (session.payment_status !== 'paid' || session.currency !== 'usd' || !/^[a-f0-9]{32}$/.test(accountId) || !Number.isInteger(amount) || amount <= 0)
         return json({ received: true, ignored: 'unpaid_or_malformed' });
-      const pack = session.metadata?.offer === 'packs_2026_09' ? topUpPack(amount) : undefined;
-      if (session.metadata?.offer === 'packs_2026_09' && !pack)
-        return fail(400, 'invalid_pack', 'Unknown top-up pack.');
-      // Legacy checkouts retain their original dollar-for-dollar credit.
+      // Sessions from the current offer credit their pack; older sessions
+      // retain their original dollar-for-dollar credit.
+      const current = session.metadata?.offer === CURRENT_OFFER;
+      const pack = current ? topUpPack(amount) : undefined;
+      if (current && !pack) return fail(400, 'invalid_pack', 'Unknown top-up pack.');
       const credit = pack?.credit_cents ?? amount;
       // Idempotent on the session id: replayed webhooks credit nothing.
       const ledgerId = `stripe_${session.id}`.slice(0, 200);
@@ -579,7 +583,7 @@ export async function handleApi(req: Request) {
         db()
           .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
             SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'purchase',NULL,?,? WHERE NOT EXISTS(SELECT 1 FROM ledger WHERE id=?) AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)`)
-          .bind(ledgerId, accountId, credit, accountId, `Card top-up: paid $${amount / 100}, received $${credit / 100} credit; valid for 3 years`, now, ledgerId, accountId),
+          .bind(ledgerId, accountId, credit, accountId, `Card top-up${pack ? ` (${pack.name})` : ''}: paid ${usd(amount)} for ${usd(credit)} of credit`, now, ledgerId, accountId),
       ]);
       return json({ received: true, credited: results[1].meta.changes > 0 });
     }
@@ -695,7 +699,7 @@ export async function handleApi(req: Request) {
         balance_cents: balance?.balance_cents ?? 0,
         currency: 'USD',
         top_ups: stripeConfigured()
-          ? 'Add credit at /account: $15 for $15 credit (up to 150 GB), or $30 for $40 credit (up to 400 GB).'
+          ? `Add credit at /account. ${describePacks()}`
           : 'Card top-ups are not configured; credit is granted by the operator.',
         ledger: rows.map((r) => ({ ...r, created_at: iso(r.created_at) })),
       });

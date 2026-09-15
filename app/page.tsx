@@ -3,6 +3,37 @@
 import { Brand } from '@/app/brand';
 import { ArrowDown, ArrowUpRight, Terminal } from 'lucide-react';
 import UploadPanel from './upload-panel';
+import {
+  CREDIT_VALIDITY_YEARS,
+  FREE_MONTHLY_TRANSFERS,
+  FREE_STORED_BYTES,
+  MAX_BYTES,
+  MINIMUM_CHARGE_CENTS,
+  PRICE_CENTS_PER_GB,
+  TOP_UP_PACKS,
+  gbLabel,
+  usd,
+} from '@/lib/rules';
+
+// A free account cannot store more than FREE_STORED_BYTES, so that is also its
+// largest file; paid files go up to MAX_BYTES.
+const tiers = [
+  {
+    name: 'Free',
+    price: usd(0),
+    blurb: `${FREE_MONTHLY_TRANSFERS} transfers a month, files up to ${gbLabel(FREE_STORED_BYTES)}. No card.`,
+    cta: 'Try free',
+  },
+  ...TOP_UP_PACKS.map((p, i) => ({
+    name: p.name,
+    price: usd(p.amount_cents),
+    oneTime: true,
+    blurb:
+      `${usd(p.credit_cents)} of credit. Up to ${p.up_to_gb} GB of transfers, files up to ${gbLabel(MAX_BYTES)}.` +
+      (i > 0 ? ` ${Math.round((1 - p.amount_cents / p.credit_cents / (TOP_UP_PACKS[0].amount_cents / TOP_UP_PACKS[0].credit_cents)) * 100)}% cheaper per GB.` : ''),
+    cta: 'Buy once, use anytime',
+  })),
+];
 
 export default function Home() {
   return (
@@ -47,45 +78,26 @@ export default function Home() {
         <UploadPanel />
       </section>
       <section id="pricing" className="pricing">
-        <div className="pricing-head">
+        <div>
           <p className="eyebrow">PRICING · USD</p>
           <h2>Start free. Pay per use, never a subscription.</h2>
         </div>
         <div className="tiers">
-          <div className="tier">
-            <h3>Free</h3>
-            <p className="tier-price">$0</p>
-            <p>5 transfers a month, files up to 5 GB. No card.</p>
-            <a className="tier-link" href="/account">
-              Try free <ArrowUpRight size={15} />
-            </a>
-          </div>
-          <div className="tier">
-            <h3>Plus</h3>
-            <p className="tier-price">
-              $15 <span>one-time</span>
-            </p>
-            <p>$15 of credit. Up to 150 GB of transfers, files up to 50 GB.</p>
-            <a className="tier-link" href="/account">
-              Buy once, use anytime <ArrowUpRight size={15} />
-            </a>
-          </div>
-          <div className="tier">
-            <h3>Pro</h3>
-            <p className="tier-price">
-              $30 <span>one-time</span>
-            </p>
-            <p>$40 of credit. Up to 400 GB of transfers, files up to 50 GB. 25% cheaper per GB.</p>
-            <a className="tier-link" href="/account">
-              Buy once, use anytime <ArrowUpRight size={15} />
-            </a>
-          </div>
+          {tiers.map((t) => (
+            <div className="tier" key={t.name}>
+              <h3>{t.name}</h3>
+              <p className="tier-price">
+                {t.price} {'oneTime' in t ? <span>one-time</span> : null}
+              </p>
+              <p>{t.blurb}</p>
+              <a className="tier-link" href="/account">
+                {t.cta} <ArrowUpRight size={15} />
+              </a>
+            </div>
+          ))}
         </div>
         <p className="pricing-note">
-          Nothing renews and nothing is charged until you send. Paid transfers
-          use $0.10 of credit per GB with a $0.25 minimum, and credit lasts
-          3 years. Every plan: 30 days to download and a signed receipt that
-          never expires.
+          {`Nothing renews and nothing is charged until you send. Paid transfers use ${usd(PRICE_CENTS_PER_GB)} of credit per GB with a ${usd(MINIMUM_CHARGE_CENTS)} minimum, and credit lasts ${CREDIT_VALIDITY_YEARS} years. Every plan: 30 days to download and a signed receipt that never expires.`}
         </p>
       </section>
       <footer>

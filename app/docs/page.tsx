@@ -3,6 +3,19 @@
 import { ConnectAgent } from '@/app/connect-agent';
 import { Brand } from '@/app/brand';
 import { ArrowUpRight, Terminal } from 'lucide-react';
+import {
+  CREDIT_VALIDITY_YEARS,
+  FREE_MONTHLY_TRANSFERS,
+  FREE_STORED_BYTES,
+  MAX_BYTES,
+  MAX_STORED_BYTES,
+  MINIMUM_CHARGE_CENTS,
+  PRICE_CENTS_PER_GB,
+  TOP_UP_PACKS,
+  gbLabel,
+  usd,
+} from '@/lib/rules';
+const packs = TOP_UP_PACKS.map((p) => `${p.name} is ${usd(p.amount_cents)} for up to ${p.up_to_gb} GB`).join(', ');
 export const metadata = { title: 'Connect your agent — Bilaga' };
 const endpoints = [
   ['GET /api/config', 'See upload limits and availability.'],
@@ -82,9 +95,7 @@ export default function Docs() {
           </li>
         </ol>
         <p className="notice">
-          Free: 5 transfers a month, files up to 5 GB. Need more? Plus is
-          $15 for up to 150 GB, Pro is $30 for up to 400 GB, files up to
-          50 GB. Pay per use, never a subscription.
+          {`Free: ${FREE_MONTHLY_TRANSFERS} transfers a month, files up to ${gbLabel(FREE_STORED_BYTES)}. Need more? ${packs}, files up to ${gbLabel(MAX_BYTES)}. Pay per use, never a subscription.`}
         </p>
         <ConnectAgent />
         <details className="agent-details">
@@ -202,17 +213,7 @@ export default function Docs() {
         </details>
         <h2>What it costs</h2>
         <p>
-          Every account gets 5 transfers per rolling 30 days and 5 GB stored
-          free, so a free file is at most 5 GB. Beyond that, a transfer is charged when it is created at $0.10
-          per decimal GB with a $0.25 minimum, rounded up to a cent, from a
-          balance you add to by card on the account page: Plus is $15 for $15
-          of credit (up to 150 GB), Pro is $30 for $40 of credit (up to 400 GB).
-          Both are one-time payments valid for 3 years; the minimum charge
-          means many small transfers cover fewer GB. An upload that never
-          completes is refunded automatically. Stored files count until they
-          expire or you delete them, up to 100 GB. Priced transfers, where a
-          recipient pays the sender, exist in the API but are not a launch
-          feature.
+          {`Every account gets ${FREE_MONTHLY_TRANSFERS} transfers per rolling 30 days and ${gbLabel(FREE_STORED_BYTES)} stored free, so a free file is at most ${gbLabel(FREE_STORED_BYTES)}. Beyond that, a transfer is charged when it is created at ${usd(PRICE_CENTS_PER_GB)} per decimal GB with a ${usd(MINIMUM_CHARGE_CENTS)} minimum, rounded up to a cent, from a balance you add to by card on the account page: ${TOP_UP_PACKS.map((p) => `${p.name} is ${usd(p.amount_cents)} for ${usd(p.credit_cents)} of credit (up to ${p.up_to_gb} GB)`).join(', ')}. Both are one-time payments valid for ${CREDIT_VALIDITY_YEARS} years; the minimum charge means many small transfers cover fewer GB. An upload that never completes is refunded automatically. Stored files count until they expire or you delete them, up to ${gbLabel(MAX_STORED_BYTES)}. Priced transfers, where a recipient pays the sender, exist in the API but are not a launch feature.`}
         </p>
         <a className="doc-file" href="/llms.txt">
           <Terminal size={18} />
