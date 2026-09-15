@@ -1,6 +1,6 @@
 # Legal pages rewritten (16 September 2026)
 
-- /terms and /privacy rewritten plainly for the current product (Plus/Pro packs, free allowance, Google sign-in, Stripe, 30-day files, no scanning). /policy aliases /privacy. Operator name and country come from lib/legal.ts; the pages show DRAFT until OPERATOR.contact is set. Pricing numbers render from lib/rules.ts. Deployed.
+- /terms and /privacy rewritten plainly for the current product (Plus/Pro packs, free allowance, Google sign-in, Stripe, 30-day files, no scanning). /policy aliases /privacy. Operator name and country come from lib/legal.ts; contact set to the operator's email, so the DRAFT label is gone. Pricing numbers render from lib/rules.ts. Deployed.
 
 
 - Worker version ba23a96c deployed with GOOGLE_CLIENT_ID (a dedicated Bilaga Google Cloud project; the first client belonged to another project's consent screen) as a var and GOOGLE_CLIENT_SECRET as a secret. The consent screen now reads bilaga.link. /api/auth/methods reports google:true; /api/auth/google redirects to Google with PKCE and the bilaga.link callback; Google accepts the client and redirect URI (no redirect_uri_mismatch). Completing a sign-in requires the operator's Google credentials and was not performed by the agent.

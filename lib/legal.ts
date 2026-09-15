@@ -2,7 +2,7 @@
 // launch; the pages stay marked DRAFT while `contact` is empty.
 export const OPERATOR = {
   name: 'Eyoel Lundberg',
-  contact: '', // e.g. 'hello@bilaga.link'
+  contact: 'eyoel.lundberg@gmail.com',
   country: 'Sweden',
   updated: '16 September 2026',
 };
