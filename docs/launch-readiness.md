@@ -1,4 +1,8 @@
-# Revised offer — local changes, not deployed (15 September 2026)
+# Google sign-in and revised offer deployed (15 September 2026)
+
+- Worker version 98b2f03f deployed with GOOGLE_CLIENT_ID as a var and GOOGLE_CLIENT_SECRET as a secret. /api/auth/methods reports google:true; /api/auth/google redirects to Google with PKCE and the bilaga.link callback; Google accepts the client and redirect URI (no redirect_uri_mismatch). The consent screen currently shows the app name "OnlyPans", so the OAuth client sits in a Google Cloud project whose consent screen needs renaming to Bilaga (or a Bilaga project). Completing a sign-in requires the operator's Google credentials and was not performed by the agent.
+- This deploy also publishes the revised offer below (Plus/Pro packs, 5-transfer allowance).
+
 
 - Website, account checkout, API docs, README and bilaga.md now describe $15 → $15 credit / up to 150 GB and $30 → $40 credit / up to 400 GB. Larger pack costs 25% less per GB.
 - Packs are named Plus ($15) and Pro ($30) in checkout product names, the account page, docs, README, llms.txt and bilaga.md. Home pricing is three cards (Free / Plus / Pro) with one line of terms; rounding and coverage caveats live in the docs and terms. Visually checked at 800px on the local dev server; lint, tsc, build and the five client tests pass.
