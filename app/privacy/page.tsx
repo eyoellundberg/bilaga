@@ -1,45 +1,38 @@
 /* oxlint-disable next/no-html-link-for-pages */
 import { Brand } from '../brand';
-export const metadata = { title: 'Privacy policy — Bilaga' };
+import { OPERATOR, contactLine, legalIsDraft } from '@/lib/legal';
+export const metadata = { title: 'Privacy — Bilaga' };
 const sections = [
   [
-    'Draft notice',
-    'Updated 12 September 2026. Operator: Lorem ipsum. Contact: Lorem ipsum. Business address: Lorem ipsum. These are placeholders; operator details and provider arrangements must be confirmed before this notice is published as final.',
+    'Who we are',
+    `Bilaga is operated by ${OPERATOR.name}, ${OPERATOR.country}. ${contactLine()} Updated ${OPERATOR.updated}.`,
   ],
   [
-    'What we collect',
-    'We store your email address, account creation time, agent token names and hashes, session and login-link hashes, and transfer metadata: filename, size, optional sender label, lifecycle times, and download-request counts. We store the file bytes you upload. Requests expose network information to Cloudflare; the app hashes IP addresses and email addresses for login rate limits. Login emails are handled by Cloudflare Email Service and your email provider.',
+    'What we store',
+    'Your email address, hashed agent tokens and sessions, and for each transfer: the filename, size, optional sender label, timestamps, and download counts. We store the files you upload, unchanged, for up to 30 days. For rate limiting we keep hashed IP addresses for a short time. If you pay, Stripe handles your card; we never see the card number, only that a payment succeeded.',
   ],
   [
-    'Why we use it',
-    'We use account and transfer information to provide sign-in, agent access, storage, download links, and account controls, as necessary to provide the service you request. We use security and rate-limit data for our legitimate interest in preventing abuse and protecting the service. Required account information is necessary to create and use an account. We do not use advertising analytics or sell uploaded files or account data.',
+    'Why',
+    'To sign you in, run your transfers, stop abuse, and keep your balance right. Nothing else. No advertising, no analytics trackers, no selling data, and no training models on your files.',
   ],
   [
-    'Who can access files',
-    'Anyone with a valid download link can access the filename, size, sender label when supplied, expiry, and file bytes. Keep links private when files are private. Cloudflare operates the hosting, database, object storage, and login email infrastructure. Bilaga does not send recipient delivery messages. Files are not end-to-end encrypted; do not use this preview for secrets or highly sensitive data. We do not scan files for malware or use uploaded files to train models.',
+    'Who can see your files',
+    'Anyone who has the download link. Keep links private if the file is private. Files are not scanned and not end-to-end encrypted. Cloudflare hosts the service and stores the files; Stripe processes payments; Google sees only that you signed in if you use Google sign-in.',
   ],
   [
-    'Cookies and browser storage',
-    'Essential HttpOnly cookies bind your login request to this browser for 15 minutes and keep you signed in for up to 30 days. Signing out revokes that browser session. The application does not set advertising or analytics cookies. Your agent should keep API tokens in its own secure settings; we store only hashes.',
+    'Cookies',
+    'One essential cookie keeps you signed in for up to 30 days, and one remembers which sign-in method you used last. No others.',
   ],
   [
-    'Retention and deletion',
-    'Login links expire after 15 minutes; sessions after 30 days. Cleanup removes expired login links and sessions. Unfinished uploads expire after 24 hours. Completed transfers expire after 30 days; older files retain their original expiry. Expiry stops new downloads. A scheduled job runs every 15 minutes and purges up to 25 eligible transfers; failures and backlogs can delay physical deletion. Transfer metadata normally remains for status after file purge. Account deletion immediately revokes credentials, pending login links, and file links and redacts personal fields; stored files are queued for removal. Redacted tombstones remain at least one day and until storage purge succeeds. Recipient copies and downloads already underway cannot be recalled. Hashed rate-limit entries become eligible for bounded cleanup after their window expires; cleanup backlogs may delay removal.',
+    'Deleting',
+    'Files are deleted 30 days after upload, or sooner if you delete them. Deleting your account revokes all tokens and links immediately and erases your email and filenames; stored files are removed shortly after. Copies already downloaded cannot be recalled. Receipts stay, with personal details redacted.',
   ],
   [
     'Your rights',
-    'Where applicable, you may request access, correction, erasure, restriction, portability, or object to processing based on legitimate interests. Delete your account through /account. Contact details for other requests are Lorem ipsum pending confirmation. You may complain to your local data protection authority, including IMY in Sweden. We do not make automated decisions with legal or similarly significant effects about you.',
-  ],
-  [
-    'International processing and outstanding details',
-    'Cloudflare may process requests and data across its global infrastructure. Before public enrollment, we must confirm the applicable processor agreements, locations, international-transfer safeguards, provider email/log/backup retention, the role of Bilaga for customer-uploaded personal data, and any required data processing agreement. We do not claim EU-only storage or a verified backup-erasure deadline. These unresolved details prevent this draft from serving as a final public notice.',
-  ],
-  [
-    'Changes',
-    'We will date policy updates and communicate material changes where appropriate. Balances are operator-granted credits recorded in an account ledger; card payment data is not collected, and payment-data disclosures will be added before card top-ups launch.',
+    'You can ask to see, correct, or erase your data, or object to how we use it. The quickest way to erase everything is to delete your account. You can also complain to your data protection authority; in Sweden that is IMY.',
   ],
 ];
-export default function Policy() {
+export default function Privacy() {
   return (
     <main className="shell">
       <header className="site-header">
@@ -48,11 +41,12 @@ export default function Policy() {
           <a href="/">Send a file</a>
           <a href="/account">Account</a>
           <a href="/docs">For agents</a>
+          <a href="/terms">Terms</a>
         </nav>
       </header>
       <article className="docs-content">
-        <p className="eyebrow">DRAFT</p>
-        <h1>Privacy policy</h1>
+        <p className="eyebrow">{legalIsDraft() ? 'DRAFT' : 'PRIVACY'}</p>
+        <h1>Privacy</h1>
         {sections.map(([heading, text]) => (
           <section key={heading}>
             <h2>{heading}</h2>

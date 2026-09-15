@@ -196,8 +196,8 @@ export default function AccountPage() {
             </button>
             <p className="small">
               Open the email link in this browser. Read our{' '}
-              <a href="/privacy">draft privacy policy</a> and{' '}
-              <a href="/terms">draft terms</a>.
+              <a href="/privacy">privacy policy</a> and{' '}
+              <a href="/terms">terms</a>.
             </p>
           </form>
         ) : (

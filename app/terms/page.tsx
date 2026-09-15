@@ -1,49 +1,50 @@
 /* oxlint-disable next/no-html-link-for-pages */
 import { Brand } from '../brand';
-export const metadata = { title: 'Terms of service — Bilaga' };
+import { OPERATOR, contactLine, legalIsDraft } from '@/lib/legal';
+import {
+  CREDIT_VALIDITY_YEARS,
+  FREE_MONTHLY_TRANSFERS,
+  FREE_STORED_BYTES,
+  MAX_BYTES,
+  MINIMUM_CHARGE_CENTS,
+  PRICE_CENTS_PER_GB,
+  TOP_UP_PACKS,
+  gbLabel,
+  usd,
+} from '@/lib/rules';
+export const metadata = { title: 'Terms — Bilaga' };
+const packs = TOP_UP_PACKS.map((p) => `${p.name} is ${usd(p.amount_cents)} for ${usd(p.credit_cents)} of credit`).join('; ');
 const sections = [
   [
-    'Draft terms',
-    'Updated 12 September 2026. Service operator: Lorem ipsum. Contact: Lorem ipsum. Business address: Lorem ipsum. These placeholders must be replaced before final publication. These terms describe the free private preview; paid terms are not yet available.',
+    'Who we are',
+    `Bilaga is operated by ${OPERATOR.name}, ${OPERATOR.country}. ${contactLine()} Updated ${OPERATOR.updated}.`,
   ],
   [
-    'The service',
-    'Bilaga lets authorized agents upload files, obtain public download links, address files to other accounts, and put a price on a file. Recipient accounts are not required to download an unpriced link. Every account can create and revoke agent tokens and send immediately. Sending is free. Balances are denominated in US cents, are granted by the operator, and cannot yet be purchased or withdrawn.',
+    'What Bilaga does',
+    `Your agent uploads a file and gets a public download link. Anyone with the link can download it for 30 days. Recipients need no account. Every transfer gets a signed receipt that stays verifiable after the file is gone. Files are stored as-is: not scanned, not end-to-end encrypted. Do not use Bilaga for secrets.`,
   ],
   [
-    'Your account and agent',
-    'Protect your email account, API tokens, and download links. You are responsible for the agents you authorize and for their transfers. Revoke tokens you no longer trust. Tokens remain valid until revoked or account deletion. Agents cannot delete your account or manage website account controls. Sign-in links work once, expire after 15 minutes, and require the requesting browser.',
+    'Your account',
+    'You sign in with an emailed link or Google. You create agent tokens and are responsible for what your agents send. Revoke any token you no longer trust. Agents cannot delete your account; only you can, from the account page.',
   ],
   [
-    'Limits, chunks, and recovery',
-    'Accepted files are nonempty and no larger than 50 decimal GB. Upload sequential chunks of 8 MiB, except the shorter final chunk. Matching retries are safe; changing bytes in an existing part is rejected. Save the private transfer ID and keep the original file unchanged. The Python client supports --resume; the browser does not provide durable resume after page closure. Unfinished uploads expire after 24 hours. Per-owner limits include three unfinished uploads, 100 transfers/day, 100 GB reserved storage, and 300 API requests/minute. Links allow 120 download requests/minute. A 50 GB accepted limit is not a guarantee of throughput or production reliability.',
+    'What it costs',
+    `Every account gets ${FREE_MONTHLY_TRANSFERS} transfers per rolling 30 days and ${gbLabel(FREE_STORED_BYTES)} stored, free. Beyond that, a transfer costs ${usd(PRICE_CENTS_PER_GB)} of credit per decimal GB, with a ${usd(MINIMUM_CHARGE_CENTS)} minimum, charged when the transfer is created and refunded if the upload never completes. Credit is bought once by card: ${packs}. Credit is valid for ${CREDIT_VALIDITY_YEARS} years, is not refundable or withdrawable, and is lost if you delete your account. There is no subscription and nothing renews. Files up to ${gbLabel(MAX_BYTES)}.`,
   ],
   [
-    'Availability and deletion',
-    'Completed files are available for 30 days from completion, unless deleted earlier; older transfers retain their original expiry. Anyone with the link can download. Expired or deleted links cannot start new downloads, but downloads already underway may finish. Deletion queues permanent storage removal; scheduled cleanup may be delayed by failures or backlogs. Account deletion disables tokens, sessions, pending sign-in links, and download links immediately. Keep your own backups; Bilaga is a temporary transfer service.',
+    'What you may not do',
+    'Do not upload anything unlawful, malware, stolen data, or content you have no right to share. Do not probe other accounts or disrupt the service. We may remove files and close accounts that break these rules. Files can also be removed when the law requires it.',
   ],
   [
-    'Your files and permitted use',
-    'You retain your rights in your files and authorize the processing necessary to store, deliver, and delete them. Upload only content you have the right to share. Do not upload unlawful content, malware, stolen credentials, or content that infringes others’ rights; do not evade limits, probe other accounts, or disrupt the service. Files are not malware-scanned. Recipients should assess files before opening them. Password-protected files receive no safety guarantee.',
+    'No guarantees',
+    'Bilaga is provided as is. We do not promise uptime, delivery, or recovery of lost files. Keep your own copy. Download counts are request counts, not proof anyone received the file. Our liability is limited to the amount you paid us in the past 12 months, except where the law does not allow that limit.',
   ],
   [
-    'Abuse and service changes',
-    'We may restrict access or disable transfers to address abuse, security risks, legal requirements, or preview operations. An abuse-reporting address and response process are still being established: Lorem ipsum. The preview may change or become unavailable. Download-request counts are not proof of completed downloads, unique recipients, or reading. “Sent” records an agent report of delivery.',
-  ],
-  [
-    'Planned pricing',
-    'When a recipient pays for a priced file, Bilaga transfers the price from the payer balance to the seller balance and retains a 5% fee; the settlement is recorded in the signed receipt. Storage is not charged separately. Paid uploads consume USD 0.10 of transfer credit per decimal GB, rounded up to a cent, with a USD 0.25 minimum per transfer. A one-time USD 15 purchase adds USD 15 credit (up to 150 GB); USD 30 adds USD 40 credit (up to 400 GB). Small transfers may reduce the total GB covered. Purchased credits are valid for three years from purchase; file downloads remain available for 30 days. Withdrawals, refunds, taxes, and the effect of account deletion on balances must be settled and disclosed before live payments launch.',
-  ],
-  [
-    'Responsibility and applicable rights',
-    'The service carries no promised uptime or recovery commitment. Nothing in these draft terms excludes mandatory consumer rights or liability that cannot lawfully be excluded. Operator jurisdiction, dispute provisions, and any enforceable liability terms remain to be confirmed before final publication.',
-  ],
-  [
-    'Privacy and updates',
-    'The privacy policy describes account information, essential cookies, file storage, link access, and deletion. Material changes will be communicated where appropriate. Final operator details and final terms must be available before public enrollment.',
+    'Changes',
+    'We may change these terms. The date at the top tells you when. Continuing to use Bilaga after a change means you accept it. Swedish law applies.',
   ],
 ];
-export default function Policy() {
+export default function Terms() {
   return (
     <main className="shell">
       <header className="site-header">
@@ -52,11 +53,12 @@ export default function Policy() {
           <a href="/">Send a file</a>
           <a href="/account">Account</a>
           <a href="/docs">For agents</a>
+          <a href="/privacy">Privacy</a>
         </nav>
       </header>
       <article className="docs-content">
-        <p className="eyebrow">DRAFT</p>
-        <h1>Terms of service</h1>
+        <p className="eyebrow">{legalIsDraft() ? 'DRAFT' : 'TERMS'}</p>
+        <h1>Terms</h1>
         {sections.map(([heading, text]) => (
           <section key={heading}>
             <h2>{heading}</h2>
