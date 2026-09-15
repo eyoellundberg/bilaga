@@ -227,8 +227,8 @@ export default function AccountPage() {
               <h2>Balance</h2>
               <p>
                 <strong>${(account.balance_cents / 100).toFixed(2)}</strong> in credit.
-                Transfers outside your free allowance are paid from here at
-                $0.10 of credit per GB ($0.25 minimum per transfer). Purchased credits are valid for 3 years. Pay $15 for up to 150 GB, or $30 for up to 400 GB — 25% less per GB. Small transfers and cent rounding may reduce the total GB covered.
+                Transfers beyond your free allowance cost $0.10 per GB ($0.25 minimum) from this balance.
+                Plus is $15 for $15 of credit; Pro is $30 for $40. Paid once, valid for 3 years.
               </p>
               {account.top_ups === 'stripe_checkout' ? (
                 <p>
@@ -245,7 +245,7 @@ export default function AccountPage() {
                         })
                       }
                     >
-                      {`$${cents / 100} · up to ${cents === 3000 ? 400 : 150} GB`}
+                      {cents === 3000 ? 'Pro · $30' : 'Plus · $15'}
                     </button>
                   ))}
                 </p>

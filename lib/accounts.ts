@@ -398,7 +398,7 @@ export async function accountRoutes(
     const body = await bodyJson(req);
     const amount = body?.amount_cents;
     if (!(TOP_UP_CENTS as readonly number[]).includes(amount))
-      return fail(400, 'invalid_amount', `Choose one of ${TOP_UP_CENTS.map((c) => `$${c / 100}`).join(' or ')}.`);
+      return fail(400, 'invalid_amount', 'Choose Plus ($15) or Pro ($30).');
     const session = await createCheckout(account.id, amount, origin);
     return json({ url: session.url, amount_cents: amount });
   }

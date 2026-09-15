@@ -1,6 +1,7 @@
 # Revised offer — local changes, not deployed (15 September 2026)
 
 - Website, account checkout, API docs, README and bilaga.md now describe $15 → $15 credit / up to 150 GB and $30 → $40 credit / up to 400 GB. Larger pack costs 25% less per GB.
+- Packs are named Plus ($15) and Pro ($30) in checkout product names, the account page, docs, README, llms.txt and bilaga.md. Home pricing is three cards (Free / Plus / Pro) with one line of terms; rounding and coverage caveats live in the docs and terms. Visually checked at 800px on the local dev server; lint, tsc, build and the five client tests pass.
 - Free allowance reduced from 20 to 5 transfers per rolling 30 days (FREE_MONTHLY_TRANSFERS in lib/rules.ts); 5 GB stored unchanged. Copy updated on home, docs, README, llms.txt and bilaga.md. Applies to existing accounts at their next transfer.
 - No subscription; three-year purchased-credit validity policy. Same 30-day file availability and free allowance. Existing $0.25 minimum and cent rounding remain and are disclosed.
 - Checkout offer metadata and webhook credit amounts updated; legacy checkout sessions retain their original credit amount.

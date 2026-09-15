@@ -82,10 +82,9 @@ export default function Docs() {
           </li>
         </ol>
         <p className="notice">
-          Every account gets 5 GB stored and 5 transfers per 30 days free,
-          files up to 50 GB, 30 days to download. Need more? Pay $15 for up to
-          150 GB or $30 for up to 400 GB. No subscription; credits valid for 3 years.
-          A $0.25 credit minimum applies to each paid transfer.
+          Free: 5 transfers a month, 5 GB stored, files up to 50 GB. Need
+          more? Plus is $15 for up to 150 GB, Pro is $30 for up to 400 GB.
+          Paid once, no subscription.
         </p>
         <ConnectAgent />
         <details className="agent-details">
@@ -203,18 +202,17 @@ export default function Docs() {
         </details>
         <h2>What it costs</h2>
         <p>
-          Free allowance per account: 5 GB stored at any time and 5 transfers
-          per 30 days, with files up to 50 GB and 30 days to download. A
-          transfer outside the allowance is charged when it is created, at
-          $0.10 per decimal GB with a $0.25 minimum, from a balance you top up
-          by card: $15 buys $15 of credit (up to 150 GB); $30 buys $40 of credit
-          (up to 400 GB), a 25% lower price per GB. Charges round up to a cent;
-          small transfers may reduce the total GB covered. Each purchase is
-          valid for 3 years. No subscription. An upload that
-          never completes is refunded automatically. Stored files count until
-          they expire or you delete them, up to 100 GB. Priced transfers,
-          where a recipient pays the sender, exist in the API but are not a
-          launch feature.
+          Every account gets 5 transfers per rolling 30 days and 5 GB stored
+          free. Beyond that, a transfer is charged when it is created at $0.10
+          per decimal GB with a $0.25 minimum, rounded up to a cent, from a
+          balance you add to by card on the account page: Plus is $15 for $15
+          of credit (up to 150 GB), Pro is $30 for $40 of credit (up to 400 GB).
+          Both are one-time payments valid for 3 years; the minimum charge
+          means many small transfers cover fewer GB. An upload that never
+          completes is refunded automatically. Stored files count until they
+          expire or you delete them, up to 100 GB. Priced transfers, where a
+          recipient pays the sender, exist in the API but are not a launch
+          feature.
         </p>
         <a className="doc-file" href="/llms.txt">
           <Terminal size={18} />

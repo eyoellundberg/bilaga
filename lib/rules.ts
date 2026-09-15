@@ -12,8 +12,8 @@ export const FREE_STORED_BYTES = 5_000_000_000;
 export const FREE_MONTHLY_TRANSFERS = 5;
 export const TOP_UP_CENTS = [1500, 3000] as const;
 export const TOP_UP_PACKS = [
-  { amount_cents: 1500, credit_cents: 1500, up_to_gb: 150 },
-  { amount_cents: 3000, credit_cents: 4000, up_to_gb: 400 },
+  { name: 'Plus', amount_cents: 1500, credit_cents: 1500, up_to_gb: 150 },
+  { name: 'Pro', amount_cents: 3000, credit_cents: 4000, up_to_gb: 400 },
 ] as const;
 export const topUpPack = (amount: number) => TOP_UP_PACKS.find((pack) => pack.amount_cents === amount);
 export const LIMITS = {

@@ -258,9 +258,7 @@ h1 span {
   border-top: 1px solid var(--border);
   padding: 38px 0 42px;
   display: grid;
-  grid-template-columns: 1.1fr 1fr 1fr;
-  gap: 36px;
-  align-items: center;
+  gap: 28px;
 }
 .pricing .eyebrow {
   margin-bottom: 13px;
@@ -271,27 +269,51 @@ h1 span {
   font-weight: 500;
   line-height: 1.35;
 }
-.price {
-  display: flex;
+.tiers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
-  align-items: center;
 }
-.price > span {
-  font-size: 46px;
-  letter-spacing: -2px;
+.tier {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tier h3 {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.2px;
+}
+.tier .tier-price {
+  color: var(--foreground);
+  font-size: 38px;
+  letter-spacing: -1.5px;
   line-height: 1;
+  margin: 2px 0 6px;
 }
-.price p {
+.tier p {
   font-size: 14px;
   color: var(--muted-foreground);
+  line-height: 1.6;
 }
-.price strong {
-  font-weight: 400;
-  display: block;
+.tier-link {
+  margin-top: auto;
+  padding-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 14px;
-  margin-top: 4px;
+  color: var(--foreground);
+  text-decoration: none;
+}
+.tier-link:hover {
+  text-decoration: underline;
 }
 .pricing-note {
+  max-width: 640px;
   font-size: 14px;
   line-height: 1.9;
   color: var(--muted-foreground);
@@ -327,15 +349,7 @@ footer {
   h1 {
     font-size: 43px;
   }
-  .pricing {
-    grid-template-columns: 1fr 1fr;
-  }
-  .pricing-note {
-    grid-column: 1/-1;
-  }
-  .price {
-    justify-content: flex-end;
-  }
+
 }
 @media (max-width: 720px) {
   .shell {
@@ -369,14 +383,10 @@ footer {
     margin-top: 24px;
   }
   .pricing {
-    grid-template-columns: 1fr;
     gap: 24px;
   }
-  .price {
-    justify-content: flex-start;
-  }
-  .pricing-note {
-    grid-column: auto;
+  .tiers {
+    grid-template-columns: 1fr;
   }
   .dropzone {
     padding: 30px 20px;
@@ -704,8 +714,7 @@ footer {
   }
   .facts,
   .pricing-note,
-  .price p,
-  .price strong,
+  .tier p,
   .card-bottom {
     font-size: 14px;
   }
@@ -756,15 +765,6 @@ footer {
 .agent-details summary:focus-visible {
   outline: 3px solid #6083ff;
   outline-offset: 4px;
-}
-
-.launch-price {
-  flex-wrap: wrap;
-}
-.launch-price > span {
-  font-size: 2rem;
-  letter-spacing: -1px;
-  white-space: nowrap;
 }
 
 .connection-steps {
