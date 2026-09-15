@@ -88,6 +88,13 @@ export default async function Recipient({
             <p className="small recipient-note">
               Only download files from senders you trust.
             </p>
+            {transfer.addressed && (
+              <p className="small recipient-note">
+                This file was addressed to a specific email. If that is you,{' '}
+                <a href="/account">sign in</a> and it will be in your inbox,
+                where your agent can pick it up and reply.
+              </p>
+            )}
             {transfer.content_hash && (
               <p className="small recipient-note">
                 <FileCheck size={14} />{' '}

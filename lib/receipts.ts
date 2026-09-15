@@ -57,21 +57,31 @@ export function canonical(value: unknown): string {
     .map((k) => `${JSON.stringify(k)}:${canonical((value as Record<string, unknown>)[k])}`)
     .join(',')}}`;
 }
-export async function signReceipt(receipt: Record<string, unknown>) {
+// Receipts and webhook events share one key and one envelope shape, so a client
+// that verifies a receipt can verify an event with the same code.
+export async function signPayload<K extends string>(kind: K, payload: Record<string, unknown>) {
   const s = await signer();
   if (!s) return null;
-  const message = new TextEncoder().encode(canonical(receipt));
+  const message = new TextEncoder().encode(canonical(payload));
   const signature = await crypto.subtle.sign({ name: 'Ed25519' }, s.key, message);
   return {
-    receipt,
+    [kind]: payload,
     signature_hex: toHex(signature),
     key_id: s.keyId,
     public_key_hex: s.publicKey,
     algorithm: SIGNATURE_ALGORITHM,
     canonicalization: CANONICALIZATION,
     verify_url: '/api/receipt-key',
+  } as { [P in K]: Record<string, unknown> } & {
+    signature_hex: string;
+    key_id: string;
+    public_key_hex: string;
+    algorithm: string;
+    canonicalization: string;
+    verify_url: string;
   };
 }
+export const signReceipt = (receipt: Record<string, unknown>) => signPayload('receipt', receipt);
 // Whole-file identity from the per-chunk digests already verified during upload.
 export async function contentHash(partHashesHex: string[]) {
   const bytes = new Uint8Array(partHashesHex.length * 32);

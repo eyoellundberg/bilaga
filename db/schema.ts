@@ -25,8 +25,13 @@ export const transfers = sqliteTable(
     downloadRequests: integer('download_requests').notNull().default(0),
     lastDownloadAt: integer('last_download_at'),
     contentHash: text('content_hash'),
+    recipient: text('recipient'),
+    receivedAt: integer('received_at'),
+    receivedBy: text('received_by'),
+    inReplyTo: text('in_reply_to'),
   },
   (t) => [
+    index('idx_transfers_recipient').on(t.recipient, t.completedAt),
     index('idx_transfers_owner_created').on(t.owner, t.createdAt),
     index('idx_transfers_expiry').on(t.expiresAt),
     index('idx_transfers_pending_cleanup').on(t.purgedAt, t.expiresAt),
@@ -62,6 +67,7 @@ export const accounts = sqliteTable('accounts', {
   createdAt: integer('created_at').notNull(),
   deletedAt: integer('deleted_at'),
   uploadsEnabled: integer('uploads_enabled').notNull().default(0),
+  handle: text('handle').unique(),
 });
 export const loginLinks = sqliteTable(
   'login_links',
@@ -109,3 +115,30 @@ export const waitlist = sqliteTable('waitlist', {
   email: text('email').primaryKey(),
   createdAt: integer('created_at').notNull(),
 });
+
+export const webhooks = sqliteTable('webhooks', {
+  accountId: text('account_id')
+    .primaryKey()
+    .references(() => accounts.id),
+  url: text('url').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+export const events = sqliteTable(
+  'events',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    type: text('type').notNull(),
+    payload: text('payload').notNull(),
+    createdAt: integer('created_at').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: integer('next_attempt_at'),
+    deliveredAt: integer('delivered_at'),
+    lastStatus: integer('last_status'),
+  },
+  (t) => [
+    index('idx_events_account_created').on(t.accountId, t.createdAt),
+    index('idx_events_pending').on(t.nextAttemptAt),
+  ],
+);

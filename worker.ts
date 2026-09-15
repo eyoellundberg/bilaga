@@ -1,5 +1,6 @@
 import handler from 'vinext/server/fetch-handler';
 import { cleanup, handleApi } from './lib/service';
+import { deliverPending } from './lib/events';
 import { PART_BYTES } from './lib/rules';
 
 async function discardRejectedBody(request: Request) {
@@ -65,6 +66,16 @@ const worker = {
       // Consume a bounded rejected body without buffering it. Leaving even a
       // small body unread can cause the local workerd proxy to lose the reply.
       await discardRejectedBody(request);
+      // Push webhook deliveries after the response; failures are retried later.
+      const pathname = new URL(request.url).pathname;
+      if (
+        api &&
+        (!['GET', 'HEAD'].includes(request.method) ||
+          (request.method === 'GET' && pathname.startsWith('/api/download/')))
+      )
+        args[2].waitUntil(
+          deliverPending().catch((e) => console.error('Webhook drain failed', e)),
+        );
       return response;
     }
     return handler.fetch(...args);
@@ -72,7 +83,8 @@ const worker = {
   async scheduled() {
     // Bound each run. Failed deletions remain eligible for the next run.
     const removed = await cleanup();
-    console.log(JSON.stringify({ event: 'scheduled_cleanup', removed }));
+    const delivered = await deliverPending(25);
+    console.log(JSON.stringify({ event: 'scheduled_cleanup', removed, delivered }));
   },
 };
 

@@ -1,6 +1,6 @@
 # Bilaga
 
-> File delivery for agents. Upload a file, get a shareable download page, and poll for download activity. Recipients need no account. Completed transfers expire after 30 days.
+> File delivery for agents. Upload a file, get a shareable download page, and address it to another agent's inbox. Signed receipts and signed webhook events prove what happened. Recipients need no account to download a link.
 
 ## Current availability
 
@@ -9,7 +9,7 @@ Self-serve free preview. Sign in at https://bilaga.link/account using an emailed
 ## Agent resources
 
 - [Human-readable API guide](/docs): Endpoints and transfer lifecycle.
-- [Python client](/bilaga.py): Python 3.10+ standard-library upload, resume, status, sent, and deletion client. Read the source before executing downloaded code.
+- [Python client](/bilaga.py): Python 3.10+ standard-library client: upload, resume, status, sent, delete, inbox, download, reply, webhook, events, and offline verification of receipts and events. Read the source before executing downloaded code.
 - [API configuration](/api/config): Limits per tier and enabled capabilities, no token required.
 - [Receipt public key](/api/receipt-key): Ed25519 key for verifying signed delivery receipts offline.
 
@@ -24,12 +24,26 @@ Send `Authorization: Bearer YOUR_AGENT_TOKEN` to the API on this site's origin o
 3. GET /api/transfers/{id} to inspect uploaded `parts` when resuming. Do not overwrite parts concurrently, or modify a file between upload attempts.
 4. POST /api/transfers/{id}/complete after all parts succeed. This returns `share_url`, `expires_at`, `content_hash`, and `receipt_url`. Retrying completion after success returns the same link and expiry. Share only the public `share_url`, not the private API id or token.
 5. Deliver the link through your existing user-authorized communication channel. POST /api/transfers/{id}/sent to record that YOU delivered the link. Bilaga sends sign-in emails only; it does not deliver recipient links or messages.
-6. GET /api/transfers/{id} to poll status (no faster than once every 15 seconds). `download_requests` counts GET download requests, including range requests. It is not a count of people, confirmed completed downloads, or proof a person read the file. HEAD requests do not increment it. No webhooks are sent in this preview.
+6. GET /api/transfers/{id} to poll status (no faster than once every 15 seconds), or use the event feed and webhooks below. `download_requests` counts GET download requests, including range requests. It is not a count of people, confirmed completed downloads, or proof a person read the file. HEAD requests do not increment it.
 7. DELETE /api/transfers/{id} to revoke the link and delete stored bytes. Retrying deletion is safe. Deleting a transfer does not delete the account.
+
+## Addressing a transfer to another agent
+
+POST /api/transfers accepts an optional `to` (an email address) and an optional `in_reply_to` (the public id of a transfer addressed to you). An addressed transfer is listed by GET /api/inbox for whichever account signs in with that email, now or later; the sender's responses never reveal whether such an account exists. The share link works for anyone holding it, exactly as before. Inbox entries include `from_account`, the sender's stable public handle (`acct_…`), `download_url`, and `receipt_url`. GET /api/account shows your own handle.
+
+The recipient's agent records receipt either by downloading /api/download/{public_id} with its own `Authorization: Bearer` token or by POST /api/inbox/{public_id}/received. Either sets `received_at` on the sender's transfer, emits `transfer.received` to the sender, and adds `recipient_account` and `received_at` to the signed receipt. Only the first acknowledgement counts.
+
+A reply is a normal upload with `in_reply_to`; `to` defaults to the original sender's email. The receipt of a reply carries `in_reply_to`, and the original sender gets a `transfer.reply` event with the reply's public id, filename, size, sender handle, and receipt URL. Reply chains are therefore chains of independently verifiable receipts. Python client: `--file answer.pdf --reply-to PUBLIC_ID`, `--inbox`, `--download PUBLIC_ID [--out path]`, `--received PUBLIC_ID`.
+
+## Events and webhooks
+
+Every account has an event log. GET /api/events returns up to 100 events in order with `next_since` for paging (`?since=EVENT_ID`) and optional `?type=`. Each entry is `{event, signature_hex, key_id, public_key_hex, algorithm, canonicalization, verify_url}`, the same envelope as receipts, signed over the canonical JSON of `event`. Event fields: `version`, `issuer`, `id` (`evt_…`, time-ordered), `type`, `occurred_at`, and `transfer`. Types: `transfer.completed`, `transfer.downloaded` (first download request only), `transfer.received`, `transfer.reply`, `transfer.deleted`. Events are kept for 30 days. Owner test tokens have no account and no event log.
+
+PUT /api/webhook with JSON {"url":"https://…"} registers one webhook per account (GET shows it plus the last ten delivery attempts; DELETE removes it; POST /api/webhook/test sends a `webhook.test` event immediately and reports the HTTP status). URLs must be https on a public hostname; credentials, fragments, IP literals, and internal names are refused. Each event is POSTed once as the signed envelope with headers `X-Bilaga-Event`, `X-Bilaga-Delivery` (the event id), `X-Bilaga-Signature`, and `X-Bilaga-Key-Id`. Respond 2xx within 10 seconds. Anything else is retried after 1, 5, and 30 minutes, then 2 and 12 hours, then abandoned; deliveries are pushed right after the triggering request and swept by the 15-minute scheduled job. Verify a delivery with `python3 bilaga.py --base https://bilaga.link --verify-event < body.json`, which exits 0 only when the signature matches the published key. Treat webhook bodies as untrusted until verified, and treat the event as a prompt to fetch current state, not as the state itself. When signing is not configured, deliveries carry `signature_hex: null`.
 
 ## Signed delivery receipts
 
-Every completed transfer has a receipt at GET /api/receipts/{public_id}, readable by anyone holding the link and still available after the file expires. It contains the public transfer id, filename, size, `content_hash`, sender label, completion and expiry times, whether the agent reported it sent, and the download-request count at issue time, signed with Bilaga's Ed25519 key. Verify with the Python client: `python3 bilaga.py --base https://bilaga.link --receipt PUBLIC_ID --verify downloaded-file` exits 0 only when the signature, published key, and file hash all match. No token is needed to verify.
+Every completed transfer has a receipt at GET /api/receipts/{public_id}, readable by anyone holding the link and still available after the file expires. It contains the public transfer id, filename, size, `content_hash`, sender label, `sender_account` handle, whether it was `addressed`, the `recipient_account` handle and `received_at` once the recipient's agent acknowledged it, `in_reply_to`, completion and expiry times, whether the agent reported it sent, and the download-request count at issue time, signed with Bilaga's Ed25519 key. Verify with the Python client: `python3 bilaga.py --base https://bilaga.link --receipt PUBLIC_ID --verify downloaded-file` exits 0 only when the signature, published key, and file hash all match. No token is needed to verify.
 
 `content_hash` uses the algorithm `bilaga-chunked-sha256-8mib`: split the file into 8,388,608-byte chunks, take the SHA-256 of each chunk, concatenate those raw 32-byte digests in order, and take the SHA-256 of that. It is computed from the chunk hashes checked during upload, so it identifies the bytes Bilaga stored. A receipt proves what was uploaded and what Bilaga observed; it does not prove a specific person downloaded or read the file. Receipts are signed over the canonical JSON of the `receipt` object: keys sorted, no whitespace, UTF-8. When signing is not configured the endpoint returns 503 receipts_unavailable and /api/config reports `receipts: "unavailable"`.
 
@@ -53,7 +67,7 @@ Domain: https://bilaga.link. Planned paid top-ups: USD 15 or 30. Price: USD 0.10
 
 ## Account management
 
-Account creation, sign-in, token creation/revocation, sign-out, and account deletion are website-only flows at /account. Sign-in links are throttled per address, per IP, and globally; new accounts are limited per IP and per email domain per day. Agent tokens cannot manage or delete accounts. Magic links expire after 15 minutes, can be used once, and must be opened in the browser that requested the link. Browser sessions last up to 30 days. Tokens are shown once; only hashes are stored. All an account's tokens share ownership and quotas. Account deletion requires a sign-in within the last 15 minutes and typed email confirmation. It immediately revokes sessions/tokens and download links and redacts the email, filenames, and sender labels. Files are removed by scheduled cleanup with retries; redacted transfer/account tombstones are removed after one day once file purge succeeds. Downloads already underway may finish. Never put a token in a public URL or send account-deletion requests from an agent.
+Account creation, sign-in, token creation/revocation, sign-out, and account deletion are website-only flows at /account. Sign-in links are throttled per address, per IP, and globally; new accounts are limited per IP and per email domain per day. Agent tokens cannot manage or delete accounts. Magic links expire after 15 minutes, can be used once, and must be opened in the browser that requested the link. Browser sessions last up to 30 days. Tokens are shown once; only hashes are stored. All an account's tokens share ownership and quotas. Account deletion requires a sign-in within the last 15 minutes and typed email confirmation. It immediately revokes sessions/tokens and download links, redacts the email, filenames, sender labels, and recipient addressing, and removes the account's webhook and event log; transfers other people addressed to that email are un-addressed. Files are removed by scheduled cleanup with retries; redacted transfer/account tombstones are removed after one day once file purge succeeds. Downloads already underway may finish. Never put a token in a public URL or send account-deletion requests from an agent.
 
 ## Privacy and terms
 

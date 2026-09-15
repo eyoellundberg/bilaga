@@ -36,6 +36,13 @@
       "when": 1789418672569,
       "tag": "0004_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789458348352,
+      "tag": "0005_network",
+      "breakpoints": true
     }
   ]
 }

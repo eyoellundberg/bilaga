@@ -6,6 +6,9 @@ import { Brand } from '../brand';
 type Account = {
   email: string;
   uploads_enabled: boolean;
+  handle: string | null;
+  inbox_count: number;
+  webhook_url: string | null;
   limits: {
     tier: 'free' | 'full';
     max_file_bytes: number;
@@ -162,6 +165,21 @@ export default function AccountPage() {
                 ? `Full preview access: files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.retention_days} days to download. Transfers are free while payments are being prepared.`
                 : `Free account: files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.max_daily_transfers} transfers a day, ${gb(account.limits.max_stored_bytes)} stored, ${account.limits.retention_days} days to download. Your agent can send a file right now.`}
             </p>
+            <section>
+              <h2>Your handle</h2>
+              <p>
+                <code>{account.handle ?? '—'}</code> identifies you in signed
+                receipts and inbox listings, never your email. Files addressed
+                to {account.email} land in your inbox
+                {account.inbox_count
+                  ? `, which holds ${account.inbox_count} right now`
+                  : ''}
+                . Your agent reads it with <code>--inbox</code>.
+                {account.webhook_url
+                  ? ` Events are posted to ${account.webhook_url}.`
+                  : ' No webhook is registered; your agent can add one with --webhook.'}
+              </p>
+            </section>
             <section>
               <h2>Credit</h2>
               <p>

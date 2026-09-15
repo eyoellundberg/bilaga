@@ -1,5 +1,6 @@
 import { json, fail, ApiError, bodyJson, boundedBody } from './http';
 import { accountRoutes, tokenOwner, cleanAccounts } from './accounts';
+import { recordEvent, eventRoutes, deliverPending, pruneEvents } from './events';
 export { json } from './http';
 import { sha256 } from './hash';
 import { env } from 'cloudflare:workers';
@@ -42,7 +43,23 @@ type Transfer = {
   purged_at: number | null;
   completion_lock_until: number;
   content_hash: string | null;
+  recipient: string | null;
+  received_at: number | null;
+  received_by: string | null;
+  in_reply_to: string | null;
 };
+type AccountIdentity = { id: string; email: string | null; handle: string | null };
+const EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i;
+async function accountIdentity(id: string | null): Promise<AccountIdentity | null> {
+  if (!id || id.length === 64) return null;
+  return (
+    (await db()
+      .prepare('SELECT id,email,handle FROM accounts WHERE id=? AND deleted_at IS NULL')
+      .bind(id)
+      .first<AccountIdentity>()) || null
+  );
+}
+export const handleOf = async (id: string | null) => (await accountIdentity(id))?.handle ?? null;
 type Part = {
   number: number;
   etag: string;
@@ -125,6 +142,8 @@ function publicData(t: Transfer) {
     filename: t.filename,
     size_bytes: t.size,
     sender: t.sender,
+    addressed: !!t.recipient,
+    in_reply_to: t.in_reply_to,
     expires_at: iso(t.expires_at),
     status:
       t.state === 'deleted'
@@ -152,11 +171,63 @@ function privateData(t: Transfer, origin: string) {
         : null,
     content_hash: t.content_hash,
     content_hash_algorithm: t.content_hash ? CONTENT_HASH_ALGORITHM : null,
+    to: t.recipient,
+    received_at: iso(t.received_at),
     estimated_price_usd: quoteCents(t.size) / 100,
     charged_usd: 0,
     billing: 'preview_no_charge',
     part_size_bytes: PART_BYTES,
   };
+}
+// What an account's own webhook and event feed see about its transfer.
+function eventData(t: Transfer, origin: string) {
+  return {
+    id: t.id,
+    public_id: t.public_id,
+    filename: t.filename,
+    size_bytes: t.size,
+    sender: t.sender,
+    to: t.recipient,
+    in_reply_to: t.in_reply_to,
+    content_hash: t.content_hash,
+    share_url: `${origin}/t/${t.public_id}`,
+    receipt_url: `${origin}/api/receipts/${t.public_id}`,
+    completed_at: iso(t.completed_at),
+    expires_at: iso(t.expires_at),
+    received_at: iso(t.received_at),
+    download_requests: t.download_requests,
+  };
+}
+// What a recipient sees: everything public plus the sender's stable handle.
+async function inboxData(t: Transfer, origin: string) {
+  return {
+    ...publicData(t),
+    public_id: t.public_id,
+    from_account: await handleOf(t.owner),
+    completed_at: iso(t.completed_at),
+    received_at: iso(t.received_at),
+    share_url: `${origin}/t/${t.public_id}`,
+    download_url: `${origin}/api/download/${t.public_id}`,
+    receipt_url: t.content_hash ? `${origin}/api/receipts/${t.public_id}` : null,
+    content_hash: t.content_hash,
+  };
+}
+async function markReceived(t: Transfer, account: AccountIdentity, origin: string) {
+  if (!t.recipient || t.recipient !== account.email) return false;
+  const first = await db()
+    .prepare(
+      "UPDATE transfers SET received_at=?,received_by=? WHERE id=? AND received_at IS NULL AND state='complete' RETURNING id",
+    )
+    .bind(Date.now(), account.id, t.id)
+    .first();
+  if (first) {
+    const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
+    await recordEvent(t.owner, 'transfer.received', {
+      ...eventData(fresh, origin),
+      received_by: account.handle,
+    });
+  }
+  return true;
 }
 async function removeBytes(t: Transfer) {
   // Revoke and redact first. A storage outage must not leave the link accessible.
@@ -213,6 +284,8 @@ export async function cleanup() {
     .bind(Date.now() - DAY)
     .run();
   await cleanAccounts();
+  await pruneEvents();
+  await deliverPending();
   return removed;
 }
 export async function publicTransfer(id: string) {
@@ -242,6 +315,11 @@ async function receipt(id: string) {
     content_hash: t.content_hash,
     content_hash_algorithm: CONTENT_HASH_ALGORITHM,
     sender: t.sender,
+    sender_account: await handleOf(t.owner),
+    addressed: !!t.recipient,
+    recipient_account: t.received_by ? await handleOf(t.received_by) : null,
+    received_at: iso(t.received_at),
+    in_reply_to: t.in_reply_to,
     completed_at: iso(t.completed_at),
     expires_at: iso(t.expires_at),
     sent_reported_at: iso(t.sent_at),
@@ -316,16 +394,22 @@ async function download(req: Request, id: string) {
   headers.set('Content-Length', String(end - offset + 1));
   headers.set('ETag', object.httpEtag);
   if (range) headers.set('Content-Range', `bytes ${offset}-${end}/${t.size}`);
+  // A recipient's agent downloading with its own token records who received it.
+  const bearer = req.headers.has('Authorization') ? await accountIdentity(await authorize(req)) : null;
   const allowed = await db()
     .prepare(
-      "UPDATE transfers SET download_requests=download_requests+1,last_download_at=? WHERE id=? AND state='complete' AND expires_at>? RETURNING id",
+      "UPDATE transfers SET download_requests=download_requests+1,last_download_at=? WHERE id=? AND state='complete' AND expires_at>? RETURNING download_requests",
     )
     .bind(Date.now(), t.id, Date.now())
-    .first();
+    .first<{ download_requests: number }>();
   if (!allowed) {
     void object.body.cancel().catch(() => {});
     return fail(410, 'unavailable', 'The transfer expired or was deleted.');
   }
+  const origin = new URL(req.url).origin;
+  if (allowed.download_requests === 1)
+    await recordEvent(t.owner, 'transfer.downloaded', eventData({ ...t, download_requests: 1 }, origin));
+  if (bearer) await markReceived(t, bearer, origin);
   return new Response(object.body, { status: range ? 206 : 200, headers });
 }
 export async function handleApi(req: Request) {
@@ -380,7 +464,8 @@ export async function handleApi(req: Request) {
         receipts: (await publicKeyInfo()) ? 'signed_ed25519' : 'unavailable',
         billing: 'preview_no_charge',
         auth: 'magic_link_and_bearer_token',
-        signals: 'polling',
+        signals: 'polling_events_webhooks',
+        addressing: 'email',
         uploads_configured: !!bindings().BILAGA_TOKEN_HASH,
       });
     if (p.length === 1 && p[0] === 'quote' && method === 'GET') {
@@ -430,6 +515,38 @@ export async function handleApi(req: Request) {
         return fail(403, 'forbidden', 'Owner access required.');
       return json({ removed: await cleanup() });
     }
+    const eventResponse = await eventRoutes(req, p, owner, rateLimit);
+    if (eventResponse) return eventResponse;
+    if (p[0] === 'inbox') {
+      const me = await accountIdentity(owner);
+      if (!me?.email)
+        return fail(403, 'account_required', 'The inbox needs an account token.');
+      if (p.length === 1 && method === 'GET') {
+        const rows = (
+          await db()
+            .prepare(
+              "SELECT * FROM transfers WHERE recipient=? AND state='complete' AND expires_at>? ORDER BY completed_at DESC LIMIT 50",
+            )
+            .bind(me.email, Date.now())
+            .all<Transfer>()
+        ).results;
+        return json({
+          account: me.handle,
+          transfers: await Promise.all(rows.map((t) => inboxData(t, u.origin))),
+        });
+      }
+      if (p.length === 3 && /^[a-f0-9]{32}$/.test(p[1]) && p[2] === 'received' && method === 'POST') {
+        const t = await db()
+          .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
+          .bind(p[1], me.email)
+          .first<Transfer>();
+        if (!t) return fail(404, 'not_found', 'No transfer addressed to you has that id.');
+        await markReceived(t, me, u.origin);
+        const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
+        return json(await inboxData(fresh, u.origin));
+      }
+      return fail(404, 'not_found', 'Endpoint not found.');
+    }
     if (p[0] !== 'transfers')
       return fail(404, 'not_found', 'Endpoint not found.');
     if (p.length === 1 && method === 'POST') {
@@ -469,14 +586,44 @@ export async function handleApi(req: Request) {
           'invalid_sender',
           'Sender must be at most 80 characters.',
         );
+      // Addressing. `to` is an email; `in_reply_to` chains this transfer to one
+      // the creator received, and defaults `to` to that transfer's sender.
+      let recipient: string | null = null;
+      let inReplyTo: string | null = null;
+      if (body.to !== undefined && body.to !== null) {
+        const to = typeof body.to === 'string' ? body.to.trim().toLowerCase() : '';
+        if (!to || to.length > 254 || !EMAIL.test(to))
+          return fail(400, 'invalid_recipient', 'to must be a valid email address.');
+        recipient = to;
+      }
+      if (body.in_reply_to !== undefined && body.in_reply_to !== null) {
+        if (typeof body.in_reply_to !== 'string' || !/^[a-f0-9]{32}$/.test(body.in_reply_to))
+          return fail(400, 'invalid_reply', 'in_reply_to must be a transfer public id.');
+        const me = await accountIdentity(owner);
+        const original = me?.email
+          ? await db()
+              .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
+              .bind(body.in_reply_to, me.email)
+              .first<Transfer>()
+          : null;
+        if (!original)
+          return fail(404, 'invalid_reply', 'You can only reply to a transfer addressed to you.');
+        inReplyTo = original.public_id;
+        if (!recipient) {
+          const sender = await accountIdentity(original.owner);
+          if (!sender?.email)
+            return fail(409, 'sender_gone', 'The original sender no longer has an account. Set `to` explicitly.');
+          recipient = sender.email;
+        }
+      }
       await cleanup();
       const id = crypto.randomUUID().replaceAll('-', ''),
         publicId = crypto.randomUUID().replaceAll('-', ''),
         now = Date.now();
       // Reserve quota and the record atomically BEFORE allocating any storage.
       const reservation = await db()
-        .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,state,created_at,expires_at)
-      SELECT ?,?,?,?,?,?,'initializing',?,? WHERE
+        .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,state,created_at,expires_at)
+      SELECT ?,?,?,?,?,?,?,?,'initializing',?,? WHERE
       (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)) AND
       (SELECT count(*) FROM transfers WHERE owner=? AND created_at>?) < ? AND
       (SELECT count(*) FROM transfers WHERE owner=? AND state IN ('initializing','uploading','completing') AND purged_at IS NULL) < ? AND
@@ -488,6 +635,8 @@ export async function handleApi(req: Request) {
           filename,
           body.size_bytes,
           body.sender || null,
+          recipient,
+          inReplyTo,
           now,
           now + DAY,
           owner,
@@ -555,7 +704,9 @@ export async function handleApi(req: Request) {
     if (p.length === 2 && method === 'GET')
       return json({ ...privateData(t, u.origin), parts: await uploadParts(t) });
     if (p.length === 2 && method === 'DELETE') {
+      const wasComplete = t.state === 'complete';
       await removeBytes(t);
+      if (wasComplete) await recordEvent(owner, 'transfer.deleted', eventData(t, u.origin));
       return json({ id: t.id, status: 'deleted' });
     }
     if (t.state === 'deleted' || t.expires_at <= Date.now())
@@ -693,6 +844,27 @@ export async function handleApi(req: Request) {
           .run();
         await removeBytes({ ...t, purged_at: null });
         return fail(410, 'deleted', 'Transfer was deleted.');
+      }
+      await recordEvent(owner, 'transfer.completed', eventData(t, u.origin));
+      if (t.in_reply_to) {
+        const original = await db()
+          .prepare('SELECT owner FROM transfers WHERE public_id=?')
+          .bind(t.in_reply_to)
+          .first<{ owner: string }>();
+        if (original)
+          await recordEvent(original.owner, 'transfer.reply', {
+            public_id: t.public_id,
+            filename: t.filename,
+            size_bytes: t.size,
+            sender: t.sender,
+            from_account: await handleOf(owner),
+            in_reply_to: t.in_reply_to,
+            content_hash: t.content_hash,
+            share_url: `${u.origin}/t/${t.public_id}`,
+            receipt_url: `${u.origin}/api/receipts/${t.public_id}`,
+            completed_at: iso(t.completed_at),
+            expires_at: iso(t.expires_at),
+          });
       }
       return json(privateData(t, u.origin));
     }

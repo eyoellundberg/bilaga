@@ -52,13 +52,14 @@ type Session = {
   email: string;
   created_at: number;
   uploads_enabled: number;
+  handle: string | null;
 };
 async function session(req: Request) {
   const token = cookie(req, 'session');
   if (!/^[a-f0-9]{64}$/.test(token))
     return fail(401, 'sign_in', 'Sign in to manage your account.');
   const row = await db()
-    .prepare(`SELECT a.id,a.email,s.created_at,a.uploads_enabled FROM sessions s JOIN accounts a ON a.id=s.account_id
+    .prepare(`SELECT a.id,a.email,s.created_at,a.uploads_enabled,a.handle FROM sessions s JOIN accounts a ON a.id=s.account_id
     WHERE s.hash=? AND s.expires_at>? AND a.deleted_at IS NULL`)
     .bind(await hash(token), Date.now())
     .first<Session>();
@@ -208,9 +209,9 @@ export async function accountRoutes(
     const results = await db().batch([
       db()
         .prepare(
-          'INSERT INTO accounts(id,email,created_at) VALUES(?,?,?) ON CONFLICT(email) DO NOTHING',
+          'INSERT INTO accounts(id,email,created_at,handle) VALUES(?,?,?,?) ON CONFLICT(email) DO NOTHING',
         )
-        .bind(id, link.email, now),
+        .bind(id, link.email, now, `acct_${random().slice(0, 16)}`),
       db()
         .prepare(
           `INSERT INTO sessions(hash,account_id,created_at,expires_at) SELECT ?,id,?,? FROM accounts WHERE email=? AND deleted_at IS NULL RETURNING account_id`,
@@ -248,8 +249,21 @@ export async function accountRoutes(
         .bind(account.id)
         .all()
     ).results;
+    const hook = await db()
+      .prepare('SELECT url FROM webhooks WHERE account_id=?')
+      .bind(account.id)
+      .first<{ url: string }>();
+    const inbox = await db()
+      .prepare(
+        "SELECT count(*) AS n FROM transfers WHERE recipient=? AND state='complete' AND expires_at>?",
+      )
+      .bind(account.email, Date.now())
+      .first<{ n: number }>();
     return json({
       email: account.email,
+      handle: account.handle,
+      inbox_count: inbox?.n ?? 0,
+      webhook_url: hook?.url ?? null,
       uploads_enabled: !!account.uploads_enabled,
       limits: describeLimits(account.uploads_enabled ? TIERS.full : TIERS.free),
       billing: 'not_available',
@@ -331,9 +345,14 @@ export async function accountRoutes(
       db().prepare('DELETE FROM login_links WHERE email=?').bind(account.email),
       db()
         .prepare(
-          "UPDATE transfers SET state='deleted',filename='Deleted file',sender=NULL WHERE owner=?",
+          "UPDATE transfers SET state='deleted',filename='Deleted file',sender=NULL,recipient=NULL WHERE owner=?",
         )
         .bind(account.id),
+      db()
+        .prepare('UPDATE transfers SET recipient=NULL WHERE recipient=?')
+        .bind(account.email),
+      db().prepare('DELETE FROM webhooks WHERE account_id=?').bind(account.id),
+      db().prepare('DELETE FROM events WHERE account_id=?').bind(account.id),
     ]);
     const response = json(
       {

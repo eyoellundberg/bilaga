@@ -1,6 +1,12 @@
-# Launch readiness — 13 September 2026
+# Launch readiness — 15 September 2026
 
 This file separates current implementation from verification and publication. The existing direct Cloudflare Worker at bilaga.link is the deployment target. The account/large-file/policy source was deployed on 13 September 2026. Deployment evidence is below; this is not public-launch certification.
+
+## Recipient identity and webhooks — 15 September 2026
+
+- Migration 0005 (handles, addressing, webhooks, events) applied locally; all suites re-run against the rebuilt Worker: client tests 5, transfer suite 39, accounts 25, scheduled, security, and the new network suite with 44 checks (webhook URL validation, signed test delivery verified with the shipped client, tampered event rejected, addressed transfer hidden from the public page, inbox isolation, received-by recorded from an authenticated download, reply chaining with `transfer.reply` to the original sender, event feed ordering/paging/filtering, failed delivery retried and drained by the scheduled job, account deletion redaction).
+- Lesson recorded: `wrangler dev` did not reload later builds during this session; restart it after every build before trusting a test result.
+- Remote migration, deployment, and the production smoke test are recorded below once done.
 
 ## Direct Cloudflare deployment — 13 September 2026
 

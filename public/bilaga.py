@@ -24,8 +24,19 @@ actions.add_argument('--status', metavar='TRANSFER_ID')
 actions.add_argument('--delete', metavar='TRANSFER_ID')
 actions.add_argument('--sent', metavar='TRANSFER_ID')
 actions.add_argument('--receipt', metavar='PUBLIC_ID', help='Fetch and verify the signed receipt for a share link')
+actions.add_argument('--inbox', action='store_true', help='List transfers addressed to your account email')
+actions.add_argument('--download', metavar='PUBLIC_ID', help='Download a file; with a token, records that your account received it')
+actions.add_argument('--received', metavar='PUBLIC_ID', help='Acknowledge a transfer addressed to you without downloading')
+actions.add_argument('--events', action='store_true', help='Read your signed event feed; use --since to page')
+actions.add_argument('--webhook', metavar='URL', help='Register an https webhook for signed events (or "off" to remove, "show" to inspect, "test" to send a test event)')
+actions.add_argument('--verify-event', action='store_true', help='Verify a signed event JSON body from stdin against the published key')
 parser.add_argument('--resume', help='Resume a known upload ID; use with the same --file')
 parser.add_argument('--verify', type=Path, metavar='DOWNLOADED_FILE', help='With --receipt: check a downloaded file against the receipt')
+parser.add_argument('--to', metavar='EMAIL', help='With --file: address the transfer to a recipient; it appears in their inbox')
+parser.add_argument('--reply-to', metavar='PUBLIC_ID', help='With --file: reply to a transfer you received; --to defaults to its sender')
+parser.add_argument('--sender', help='With --file: a display label for the sender')
+parser.add_argument('--out', type=Path, help='With --download: where to save (default: the original filename in the current directory)')
+parser.add_argument('--since', metavar='EVENT_ID', help='With --events: return events after this id')
 args=parser.parse_args()
 origin=args.base.rstrip('/')
 url=urlparse(origin)
@@ -34,7 +45,7 @@ if url.scheme!='https' and not (url.scheme=='http' and url.hostname in ('localho
 if url.username or url.password or url.path or url.query or url.fragment:
     parser.error('--base must be an origin without credentials, path, query, or fragment.')
 token=os.environ.get('BILAGA_TOKEN','').strip()
-if not token and not args.receipt:
+if not token and not (args.receipt or args.verify_event):
     parser.error('Set BILAGA_TOKEN in your environment; do not put tokens in download links.')
 opener=build_opener(NoRedirect)
 
@@ -89,12 +100,15 @@ def content_hash(path,part_size):
 def public_get(path):
     with opener.open(Request(origin+'/api/'+path,headers={'User-Agent':'Bilaga-Client/0.1','Accept':'application/json'}),timeout=60) as res:
         return json.load(res)
+def verify_signed(signed,kind):
+    key=public_get('receipt-key')
+    payload=signed[kind]
+    checks={'key_matches_published':signed.get('public_key_hex')==key['public_key_hex'] and signed.get('key_id')==key['key_id']}
+    checks['signature_valid']=bool(signed.get('signature_hex')) and ed25519_verify(bytes.fromhex(key['public_key_hex']),canonical(payload).encode(),bytes.fromhex(signed['signature_hex']))
+    return checks,payload
 def verify_receipt(public_id,file=None):
     signed=public_get('receipts/'+public_id)
-    key=public_get('receipt-key')
-    receipt=signed['receipt']
-    checks={'key_matches_published':signed['public_key_hex']==key['public_key_hex'] and signed['key_id']==key['key_id']}
-    checks['signature_valid']=ed25519_verify(bytes.fromhex(key['public_key_hex']),canonical(receipt).encode(),bytes.fromhex(signed['signature_hex']))
+    checks,receipt=verify_signed(signed,'receipt')
     checks['transfer_matches']=receipt.get('transfer')==public_id and receipt.get('content_hash_algorithm')=='bilaga-chunked-sha256-8mib'
     if file is not None:
         checks['file_size_matches']=file.stat().st_size==receipt['size_bytes']
@@ -122,7 +136,40 @@ try:
         result=verify_receipt(args.receipt,args.verify)
         print(json.dumps(result,indent=2))
         sys.exit(0 if result['verified'] else 2)
-    if args.status:
+    if args.verify_event:
+        signed=json.load(sys.stdin)
+        checks,event=verify_signed(signed,'event')
+        checks['issuer_matches']=event.get('issuer')=='bilaga.link' and event.get('id','').startswith('evt_')
+        result={'verified':all(checks.values()),'checks':checks,'event':event}
+        print(json.dumps(result,indent=2))
+        sys.exit(0 if result['verified'] else 2)
+    if args.download:
+        with opener.open(Request(origin+'/api/download/'+args.download,headers={'User-Agent':'Bilaga-Client/0.1','Authorization':'Bearer '+token}),timeout=3600) as res:
+            disposition=res.headers.get('Content-Disposition','')
+            name=None
+            if "filename*=UTF-8''" in disposition:
+                from urllib.parse import unquote
+                name=unquote(disposition.split("filename*=UTF-8''",1)[1].split(';')[0])
+            out=args.out or Path(Path(name or args.download).name)
+            if out.exists():raise RuntimeError(f'{out} already exists; pass --out to choose another path.')
+            digest=hashlib.sha256();size=0
+            with out.open('wb') as f:
+                while chunk:=res.read(1<<20):
+                    f.write(chunk);digest.update(chunk);size+=len(chunk)
+        result={'saved':str(out),'size_bytes':size,'sha256':digest.hexdigest(),'public_id':args.download}
+        print(json.dumps(result,indent=2));sys.exit(0)
+    if args.inbox:
+        result=api('inbox')
+    elif args.received:
+        result=api('inbox/'+args.received+'/received','POST',retry=True)
+    elif args.events:
+        result=api('events'+('?since='+args.since if args.since else ''))
+    elif args.webhook:
+        if args.webhook=='show':result=api('webhook')
+        elif args.webhook=='off':result=api('webhook','DELETE')
+        elif args.webhook=='test':result=api('webhook/test','POST')
+        else:result=api('webhook','PUT',{'url':args.webhook})
+    elif args.status:
         result=api('transfers/'+args.status)
     elif args.delete:
         result=api('transfers/'+args.delete,'DELETE',retry=True)
@@ -139,7 +186,11 @@ try:
             if transfer['filename']!=path.name or transfer['size_bytes']!=size:
                 raise RuntimeError('Resume requires the same file name and size. Do not modify the file between attempts.')
         else:
-            transfer=api('transfers','POST',{'filename':path.name,'size_bytes':size})
+            create={'filename':path.name,'size_bytes':size}
+            if args.to:create['to']=args.to
+            if args.reply_to:create['in_reply_to']=args.reply_to
+            if args.sender:create['sender']=args.sender
+            transfer=api('transfers','POST',create)
         tid=transfer['id']
         print('Transfer ID: '+tid+' (use --resume with the same unchanged file if interrupted)',file=sys.stderr)
         if transfer['status']=='complete':

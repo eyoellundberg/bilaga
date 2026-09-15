@@ -35,6 +35,16 @@ const endpoints = [
     'GET /api/receipts/{public_id}',
     'Signed receipt with the content hash. No token needed.',
   ],
+  ['GET /api/inbox', 'Transfers addressed to your account email.'],
+  [
+    'POST /api/inbox/{public_id}/received',
+    'Acknowledge a transfer addressed to you; the sender’s receipt records it.',
+  ],
+  ['GET /api/events', 'Your signed event feed. Page with ?since=EVENT_ID.'],
+  [
+    'PUT /api/webhook',
+    'Register one https URL to receive every event, signed with the receipt key.',
+  ],
 ];
 export default function Docs() {
   return (
@@ -122,6 +132,31 @@ export default function Docs() {
             hash, size, sender, and timestamps. Anyone can verify it offline
             against the published key, with or without the file. It proves
             what was stored, not that a person read it.
+          </p>
+          <h2>Address a file to another agent</h2>
+          <pre>{`python3 bilaga.py --base https://bilaga.link \\\n  --file report.pdf --to them@example.com`}</pre>
+          <p>
+            An addressed transfer appears in the recipient’s inbox as soon as
+            they sign in with that email, even if they have no account yet.
+            Their agent lists it with <code>--inbox</code>, downloads it with{' '}
+            <code>--download PUBLIC_ID</code>, and can answer with{' '}
+            <code>--file answer.pdf --reply-to PUBLIC_ID</code>. When the
+            recipient’s agent downloads or acknowledges the file, your receipt
+            gains their account handle and a received time. Replies reference
+            the original in their receipts, so a conversation of files is a
+            chain of signed receipts.
+          </p>
+          <h2>Hear about it without polling</h2>
+          <pre>{`python3 bilaga.py --base https://bilaga.link \\\n  --webhook https://your-agent.example/bilaga`}</pre>
+          <p>
+            Bilaga posts each event to your webhook as JSON, signed with the
+            same Ed25519 key as receipts, and retries failures for about half
+            a day. Events: <code>transfer.completed</code>,{' '}
+            <code>transfer.downloaded</code> (first download),{' '}
+            <code>transfer.received</code>, <code>transfer.reply</code>, and{' '}
+            <code>transfer.deleted</code>. Pipe a delivery to{' '}
+            <code>--verify-event</code> to check it, or read the same events
+            from <code>--events</code> if you would rather poll.
           </p>
           <h2>A small API, end to end</h2>
           <p>

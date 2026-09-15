@@ -29,6 +29,7 @@ type Transfer = {
 export default function UploadPanel() {
   const [file, setFile] = useState<File | null>(null),
     [token, setToken] = useState(''),
+    [to, setTo] = useState(''),
     [busy, setBusy] = useState(false),
     [progress, setProgress] = useState(0),
     [error, setError] = useState(''),
@@ -65,7 +66,11 @@ export default function UploadPanel() {
       const transfer = await api<Transfer>(
         '/api/transfers',
         'POST',
-        JSON.stringify({ filename: file.name, size_bytes: file.size }),
+        JSON.stringify({
+          filename: file.name,
+          size_bytes: file.size,
+          ...(to.trim() ? { to: to.trim() } : {}),
+        }),
         controller.signal,
       );
       activeId.current = transfer.id;
@@ -322,6 +327,21 @@ export default function UploadPanel() {
               />
               <p className="small">
                 Kept in this page’s memory. Never added to your link.
+              </p>
+              <label htmlFor="recipient-email">Recipient email (optional)</label>
+              <Input
+                id="recipient-email"
+                type="email"
+                autoComplete="off"
+                value={to}
+                disabled={busy}
+                onChange={(e) => setTo(e.target.value)}
+                placeholder="them@example.com"
+                spellCheck={false}
+              />
+              <p className="small">
+                Addressed files appear in that person’s Bilaga inbox, and your
+                receipt records when their agent picks it up.
               </p>
               {busy ? (
                 <>
