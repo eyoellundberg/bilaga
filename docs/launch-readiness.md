@@ -2,6 +2,12 @@
 
 This file separates current implementation from verification and publication. The existing direct Cloudflare Worker at bilaga.link is the deployment target. The account/large-file/policy source was deployed on 13 September 2026. Deployment evidence is below; this is not public-launch certification.
 
+## Free allowance, charges, Stripe Checkout — 15 September 2026 (night)
+
+- Migration 0008 (charged_cents) applied locally and remotely. Worker version 4bf7f31a-a64d-4e75-aeaa-222764e21ee1 deployed after all suites passed: transfer 43, accounts 33 (top-up amount validation, 503 without a Stripe key, webhook credits once per session id, replay credits nothing, wrong secret and stale timestamp rejected, unpaid session ignored), scheduled, security, network 73 (402 with price outside the free storage, charge debited at creation, refund on deletion before completion, minimum charge past the monthly count, completed charge kept, owner token never charged).
+- Production: config reports free allowance then balance, 5 GB and 20 per 30 days, top-ups unavailable until Stripe secrets exist; quote for 1 GB is $0.25; home and docs carry the new pricing; the webhook rejects unsigned posts; an owner-token upload is still free.
+- To enable card top-ups: create a Stripe account, upload `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` with `wrangler secret put`, register the endpoint https://bilaga.link/api/stripe/webhook for the event checkout.session.completed, redeploy, and run one real $10 top-up on a test account to confirm the ledger row.
+
 ## Receipts kept forever — 15 September 2026 (evening)
 
 - Migration 0007 (receipt_requests, content-hash index) applied locally and remotely. Worker version 024a3bfa-883d-400f-b999-92625b53d2c2 deployed after all suites passed: transfer suite 43 (receipt after deletion with status deleted and redacted filename, lookup by hash, counter, client `--receipt-hash` verification), accounts 30 (redacted transfer row and email-less account tombstone survive scheduled erasure; the deleted receipt still resolves the sender handle), scheduled, security, network 59.
