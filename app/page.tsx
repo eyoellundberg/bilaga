@@ -56,19 +56,19 @@ export default function Home() {
           </h2>
         </div>
         <div className="price launch-price">
-          <span>$0</span>
+          <span>$0.10</span>
           <p>
-            per transfer, for everyone
+            per GB beyond the free allowance
             <br />
-            <strong>50 GB per file · 20 a day · 30 days to download</strong>
+            <strong>5 GB stored and 20 transfers per month free · 50 GB per file · 30 days to download</strong>
           </p>
         </div>
         <p className="pricing-note">
+          Add $10 or $15 of credit by card; it never expires. A 1 GB file
+          costs $0.25, 10 GB costs $1, 50 GB costs $5.
+          <br />
           Every transfer gets a signed receipt that stays verifiable after the
           file is gone, and anyone holding the file can look it up by hash.
-          <br />
-          Storage will be billed at $0.10 per GB, $0.25 minimum, once card
-          top-ups exist. Until then it is free.
         </p>
       </section>
       <footer>

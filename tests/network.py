@@ -152,6 +152,22 @@ paid_event = wait_for('transfer.paid',public_id=ppid)[0]['body']['event']; asser
 assert [e['event']['type'] for e in bearer(tb,'events?type=transfer.paid')['events']]==['transfer.paid']
 bearer(ta,'transfers/'+priced['id'],'DELETE')
 
+# Free allowance, then charges: past the free storage a transfer costs the storage price, is refunded if abandoned, and kept if completed.
+sql(f"UPDATE accounts SET balance_cents=0 WHERE email='{b_email}'")
+big = bearer(tb,'transfers','POST',{'filename':'big.bin','size_bytes':5_000_000_001},expect=402)
+assert big['error']['code']=='insufficient_balance' and '0.51' in big['error']['message']
+sql(f"UPDATE accounts SET balance_cents=100 WHERE email='{b_email}'")
+big = bearer(tb,'transfers','POST',{'filename':'big.bin','size_bytes':5_000_000_001},expect=201)
+assert big['charged_usd']==0.51 and big['billing']=='balance' and bearer(tb,'balance')['balance_cents']==49
+bearer(tb,'transfers/'+big['id'],'DELETE')
+bal = bearer(tb,'balance'); assert bal['balance_cents']==100 and bal['ledger'][0]['kind']=='refund' and bal['ledger'][1]['kind']=='charge', bal['ledger'][:2]
+# Past the monthly count, even a tiny file costs the minimum, and completing it keeps the charge.
+for i in range(20): sql(f"INSERT INTO transfers (id,public_id,owner,filename,size,state,created_at,expires_at,purged_at) VALUES ('fill{i}{secrets.token_hex(4)}','fill{i}{secrets.token_hex(8)}',(SELECT id FROM accounts WHERE email='{b_email}'),'fill',1,'complete',{int(time.time()*1000)-1000},{int(time.time()*1000)-1},{int(time.time()*1000)})")
+small = upload(tb,'tiny.txt',b'x'); assert small['charged_usd']==0.25 and small['billing']=='balance'
+bearer(tb,'transfers/'+small['id'],'DELETE'); assert bearer(tb,'balance')['balance_cents']==75
+sql("DELETE FROM transfers WHERE filename='fill'")
+free = upload(ta,'still-free.txt',b'y'); assert free['charged_usd']==0 and free['billing']=='free_allowance'; bearer(ta,'transfers/'+free['id'],'DELETE')
+
 # A failing endpoint is retried later, not dropped; removing the webhook stops retries.
 bearer(tb,'webhook','PUT',{'url':'http://127.0.0.1:3120/broken'})
 bearer(tb,'transfers/'+reply['id'],'DELETE')

@@ -1,0 +1,1 @@
+ALTER TABLE `transfers` ADD `charged_cents` integer DEFAULT 0 NOT NULL;

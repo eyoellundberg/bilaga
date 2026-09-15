@@ -1,6 +1,7 @@
 import { json, fail, ApiError, bodyJson, boundedBody } from './http';
 import { accountRoutes, tokenOwner, cleanAccounts } from './accounts';
 import { recordEvent, eventRoutes, deliverPending, pruneEvents } from './events';
+import { stripeConfigured, verifyStripeSignature } from './stripe';
 export { json } from './http';
 import { sha256 } from './hash';
 import { env } from 'cloudflare:workers';
@@ -9,6 +10,7 @@ import {
   PART_BYTES,
   DAY,
   LIMITS,
+  MONTH,
   describeLimits,
   feeCents,
   validPrice,
@@ -53,6 +55,7 @@ type Transfer = {
   paid_at: number | null;
   paid_by: string | null;
   receipt_requests: number;
+  charged_cents: number;
 };
 type AccountIdentity = { id: string; email: string | null; handle: string | null };
 const EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i;
@@ -221,8 +224,8 @@ function privateData(t: Transfer, origin: string) {
     received_at: iso(t.received_at),
     paid_at: iso(t.paid_at),
     estimated_storage_price_usd: quoteCents(t.size) / 100,
-    charged_usd: 0,
-    billing: 'storage_not_charged',
+    charged_usd: t.charged_cents / 100,
+    billing: t.charged_cents ? 'balance' : 'free_allowance',
     part_size_bytes: PART_BYTES,
   };
 }
@@ -281,7 +284,24 @@ async function markReceived(t: Transfer, account: AccountIdentity, origin: strin
   }
   return true;
 }
+// A charge is only kept for a completed transfer. Abandoned or revoked uploads
+// give the balance back exactly once.
+async function refundIfUnfinished(t: Transfer) {
+  if (t.state === 'complete' || t.charged_cents <= 0) return;
+  const now = Date.now();
+  await db().batch([
+    db()
+      .prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND EXISTS(SELECT 1 FROM transfers WHERE id=? AND charged_cents>0 AND state<>'complete')`)
+      .bind(t.charged_cents, t.owner, t.id),
+    db()
+      .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
+        SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'refund',?,?,? WHERE EXISTS(SELECT 1 FROM transfers WHERE id=? AND charged_cents>0 AND state<>'complete')`)
+      .bind(crypto.randomUUID().replaceAll('-', ''), t.owner, t.charged_cents, t.owner, t.id, `Upload of ${t.filename} did not complete`, now, t.id),
+    db().prepare(`UPDATE transfers SET charged_cents=0 WHERE id=? AND state<>'complete'`).bind(t.id),
+  ]);
+}
 async function removeBytes(t: Transfer) {
+  await refundIfUnfinished(t);
   // Revoke and redact first. A storage outage must not leave the link accessible.
   await db()
     .prepare(
@@ -526,6 +546,37 @@ export async function handleApi(req: Request) {
           'Cross-origin changes are not allowed.',
         );
     }
+    // Stripe calls this with no Origin header and a raw JSON body; the HMAC is the auth.
+    if (p.length === 2 && p[0] === 'stripe' && p[1] === 'webhook' && method === 'POST') {
+      const raw = new TextDecoder().decode(await boundedBody(req, 65_536));
+      if (!(await verifyStripeSignature(req.headers.get('Stripe-Signature'), raw)))
+        return fail(400, 'bad_signature', 'Invalid Stripe signature.');
+      let event: { type?: string; data?: { object?: { id?: string; payment_status?: string; amount_total?: number; currency?: string; metadata?: { account_id?: string } } } };
+      try {
+        event = JSON.parse(raw);
+      } catch {
+        return fail(400, 'invalid_json', 'Send a JSON object.');
+      }
+      const session = event.data?.object;
+      if (event.type !== 'checkout.session.completed' || !session?.id) return json({ received: true, ignored: event.type });
+      const accountId = session.metadata?.account_id || '';
+      const amount = session.amount_total ?? 0;
+      if (session.payment_status !== 'paid' || session.currency !== 'usd' || !/^[a-f0-9]{32}$/.test(accountId) || !Number.isInteger(amount) || amount <= 0)
+        return json({ received: true, ignored: 'unpaid_or_malformed' });
+      // Idempotent on the session id: replayed webhooks credit nothing.
+      const ledgerId = `stripe_${session.id}`.slice(0, 200);
+      const now = Date.now();
+      const results = await db().batch([
+        db()
+          .prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM ledger WHERE id=?)`)
+          .bind(amount, accountId, ledgerId),
+        db()
+          .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
+            SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'purchase',NULL,?,? WHERE NOT EXISTS(SELECT 1 FROM ledger WHERE id=?) AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)`)
+          .bind(ledgerId, accountId, amount, accountId, 'Card top-up', now, ledgerId, accountId),
+      ]);
+      return json({ received: true, credited: results[1].meta.changes > 0 });
+    }
     const accountResponse = await accountRoutes(req, p, rateLimit);
     if (accountResponse) return accountResponse;
     if (p.length === 1 && p[0] === 'config' && method === 'GET')
@@ -534,8 +585,12 @@ export async function handleApi(req: Request) {
         ...describeLimits(),
         part_size_bytes: PART_BYTES,
         receipts: (await publicKeyInfo()) ? 'signed_ed25519' : 'unavailable',
-        billing: 'storage_not_charged',
-        payments: { transfer_prices: 'balance', fee_bps: FEE_BPS, top_ups: 'operator_grant_only' },
+        billing: 'free_allowance_then_balance',
+        payments: {
+          top_ups: stripeConfigured() ? 'stripe_checkout' : 'unavailable',
+          transfer_prices: 'balance',
+          fee_bps: FEE_BPS,
+        },
         auth: 'magic_link_and_bearer_token',
         signals: 'polling_events_webhooks',
         addressing: 'email',
@@ -553,10 +608,10 @@ export async function handleApi(req: Request) {
         size_bytes: bytes,
         estimated_price_usd: quoteCents(bytes) / 100,
         currency: 'USD',
-        charged_usd: 0,
+        charged_usd_outside_free_allowance: quoteCents(bytes) / 100,
         upload_allowed: bytes <= MAX_BYTES,
         max_file_bytes: MAX_BYTES,
-        billing: 'storage_not_charged',
+        billing: 'free_allowance_then_balance',
       });
     }
     if (p.length === 1 && p[0] === 'receipt-key' && method === 'GET') {
@@ -633,7 +688,9 @@ export async function handleApi(req: Request) {
         account: me.handle,
         balance_cents: balance?.balance_cents ?? 0,
         currency: 'USD',
-        top_ups: 'Card top-ups are not available yet; credit is granted by the operator.',
+        top_ups: stripeConfigured()
+          ? 'Add credit at /account with a card ($10 or $15).'
+          : 'Card top-ups are not configured; credit is granted by the operator.',
         ledger: rows.map((r) => ({ ...r, created_at: iso(r.created_at) })),
       });
     }
@@ -781,43 +838,60 @@ export async function handleApi(req: Request) {
       const id = crypto.randomUUID().replaceAll('-', ''),
         publicId = crypto.randomUUID().replaceAll('-', ''),
         now = Date.now();
-      // Reserve quota and the record atomically BEFORE allocating any storage.
-      const reservation = await db()
-        .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,price_cents,state,created_at,expires_at)
-      SELECT ?,?,?,?,?,?,?,?,?,'initializing',?,? WHERE
-      (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)) AND
-      (SELECT count(*) FROM transfers WHERE owner=? AND created_at>?) < ? AND
+      // Free allowance or a charge from the balance. The owner test token is
+      // never charged; accounts pay the storage price once they are past the
+      // free storage or the free monthly count.
+      let charge = 0;
+      if (owner.length !== 64) {
+        const usage = await db()
+          .prepare(
+            `SELECT (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND state<>'deleted') AS monthly,
+                    COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0) AS stored,
+                    (SELECT balance_cents FROM accounts WHERE id=?) AS balance`,
+          )
+          .bind(owner, now - MONTH, owner, owner)
+          .first<{ monthly: number; stored: number; balance: number }>();
+        const withinFree =
+          (usage?.monthly ?? 0) < limits.free_transfers_per_30_days &&
+          (usage?.stored ?? 0) + body.size_bytes <= limits.free_stored_bytes;
+        if (!withinFree) {
+          charge = quoteCents(body.size_bytes);
+          if ((usage?.balance ?? 0) < charge)
+            return fail(
+              402,
+              'insufficient_balance',
+              `This transfer is outside your free allowance (${fileLabel(limits.free_stored_bytes)} stored, ${limits.free_transfers_per_30_days} transfers per 30 days) and costs ${(charge / 100).toFixed(2)} USD. Your balance is ${((usage?.balance ?? 0) / 100).toFixed(2)} USD. Add credit at ${u.origin}/account.`,
+            );
+        }
+      }
+      // Reserve quota, the charge, and the record atomically BEFORE allocating any storage.
+      const results = await db().batch([
+        db()
+          .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,price_cents,charged_cents,state,created_at,expires_at)
+      SELECT ?,?,?,?,?,?,?,?,?,?,'initializing',?,? WHERE
+      (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL AND balance_cents>=?)) AND
       (SELECT count(*) FROM transfers WHERE owner=? AND state IN ('initializing','uploading','completing') AND purged_at IS NULL) < ? AND
       COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ? RETURNING id`)
-        .bind(
-          id,
-          publicId,
-          owner,
-          filename,
-          body.size_bytes,
-          body.sender || null,
-          recipient,
-          inReplyTo,
-          price,
-          now,
-          now + DAY,
-          owner,
-          owner,
-          owner,
-          now - DAY,
-          limits.max_daily_transfers,
-          owner,
-          limits.max_pending_uploads,
-          owner,
-          body.size_bytes,
-          limits.max_stored_bytes,
-        )
-        .first();
-      if (!reservation)
+          .bind(
+            id, publicId, owner, filename, body.size_bytes, body.sender || null, recipient, inReplyTo, price, charge,
+            now, now + DAY,
+            owner, owner, charge,
+            owner, limits.max_pending_uploads,
+            owner, body.size_bytes, limits.max_stored_bytes,
+          ),
+        db()
+          .prepare(`UPDATE accounts SET balance_cents=balance_cents-? WHERE id=? AND ?>0 AND EXISTS(SELECT 1 FROM transfers WHERE id=?)`)
+          .bind(charge, owner, charge, id),
+        db()
+          .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
+            SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'charge',?,?,? WHERE ?>0 AND EXISTS(SELECT 1 FROM transfers WHERE id=?)`)
+          .bind(crypto.randomUUID().replaceAll('-', ''), owner, -charge, owner, id, `Transfer of ${filename} (${fileLabel(body.size_bytes)})`, now, charge, id),
+      ]);
+      if (!results[0].results.length)
         return fail(
           429,
           'account_limit',
-          `Limit reached: ${limits.max_daily_transfers} transfers per day, ${limits.max_pending_uploads} unfinished upload${limits.max_pending_uploads === 1 ? '' : 's'}, or ${fileLabel(limits.max_stored_bytes)} reserved storage.`,
+          `Limit reached: ${limits.max_pending_uploads} unfinished upload${limits.max_pending_uploads === 1 ? '' : 's'}, ${fileLabel(limits.max_stored_bytes)} reserved storage, or an insufficient balance.`,
         );
       let multi: R2MultipartUpload | undefined;
       try {

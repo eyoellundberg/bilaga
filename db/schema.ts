@@ -33,6 +33,7 @@ export const transfers = sqliteTable(
     paidAt: integer('paid_at'),
     paidBy: text('paid_by'),
     receiptRequests: integer('receipt_requests').notNull().default(0),
+    chargedCents: integer('charged_cents').notNull().default(0),
   },
   (t) => [
     index('idx_transfers_recipient').on(t.recipient, t.completedAt),

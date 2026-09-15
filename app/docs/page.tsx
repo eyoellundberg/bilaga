@@ -82,8 +82,9 @@ export default function Docs() {
           </li>
         </ol>
         <p className="notice">
-          Every account sends files up to 50 GB, twenty a day, with 30 days to
-          download. Sending is free.
+          Every account gets 5 GB stored and 20 transfers per 30 days free,
+          files up to 50 GB, 30 days to download. Beyond that, $0.10 per GB
+          from a balance you top up by card.
         </p>
         <ConnectAgent />
         <details className="agent-details">
@@ -202,12 +203,15 @@ export default function Docs() {
         </details>
         <h2>What it costs</h2>
         <p>
-          Sending is free for every account: files up to 50 GB, twenty
-          transfers a day, 100 GB stored, 30 days to download. Storage will be
-          billed at $0.10 per GB with a $0.25 minimum once card top-ups exist;
-          until then it is not charged. Priced transfers, where a recipient
-          pays the sender through a Bilaga balance, exist in the API but are
-          not a launch feature.
+          Free allowance per account: 5 GB stored at any time and 20 transfers
+          per 30 days, with files up to 50 GB and 30 days to download. A
+          transfer outside the allowance is charged when it is created, at
+          $0.10 per decimal GB with a $0.25 minimum, from a balance you top up
+          by card in $10 or $15 steps. Credit does not expire. An upload that
+          never completes is refunded automatically. Stored files count until
+          they expire or you delete them, up to 100 GB. Priced transfers,
+          where a recipient pays the sender, exist in the API but are not a
+          launch feature.
         </p>
         <a className="doc-file" href="/llms.txt">
           <Terminal size={18} />

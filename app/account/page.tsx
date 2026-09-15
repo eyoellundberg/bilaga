@@ -15,9 +15,12 @@ type Account = {
   limits: {
     max_file_bytes: number;
     max_stored_bytes: number;
-    max_daily_transfers: number;
+    free_stored_bytes: number;
+    free_transfers_per_30_days: number;
     retention_days: number;
   };
+  top_ups: 'stripe_checkout' | 'unavailable';
+  top_up_cents: number[];
   tokens: { id: string; label: string; created_at: number }[];
 };
 const gb = (bytes: number) => `${bytes / 1e9} GB`;
@@ -55,9 +58,18 @@ export default function AccountPage() {
       }
     };
     readLogin();
-    const failure = new URLSearchParams(location.hash.slice(1)).get('error');
-    if (failure) {
-      queueMicrotask(() => setMessage(failure));
+    const hashParams = new URLSearchParams(location.hash.slice(1));
+    const failure = hashParams.get('error');
+    const topup = hashParams.get('topup');
+    if (failure || topup) {
+      queueMicrotask(() =>
+        setMessage(
+          failure ||
+            (topup === 'ok'
+              ? 'Payment received. Your balance updates within a few seconds.'
+              : 'Top-up cancelled. Nothing was charged.'),
+        ),
+      );
       history.replaceState(null, '', '/account');
     }
     try {
@@ -191,7 +203,7 @@ export default function AccountPage() {
               Signed in as <strong>{account.email}</strong>.
             </p>
             <p className="notice">
-              {`Files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.max_daily_transfers} transfers a day, ${gb(account.limits.max_stored_bytes)} stored, ${account.limits.retention_days} days to download. Sending is free. Your agent can send a file right now.`}
+              {`Free: ${gb(account.limits.free_stored_bytes)} stored and ${account.limits.free_transfers_per_30_days} transfers per 30 days, files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.retention_days} days to download. Beyond that, $0.10 per GB ($0.25 minimum) from your balance, up to ${gb(account.limits.max_stored_bytes)} stored.`}
             </p>
             <section>
               <h2>Your handle</h2>
@@ -215,9 +227,31 @@ export default function AccountPage() {
               <h2>Balance</h2>
               <p>
                 <strong>${(account.balance_cents / 100).toFixed(2)}</strong> USD.
-                Sending is free; balances are an experimental feature for
-                priced transfers and are granted by the operator.
+                Transfers outside your free allowance are paid from here at
+                $0.10 per GB. Credit does not expire.
               </p>
+              {account.top_ups === 'stripe_checkout' ? (
+                <p>
+                  {account.top_up_cents.map((cents) => (
+                    <button
+                      key={cents}
+                      className="account-button"
+                      disabled={busy}
+                      style={{ marginRight: 8 }}
+                      onClick={() =>
+                        act(async () => {
+                          const { url } = await api<{ url: string }>('account/topup', 'POST', { amount_cents: cents });
+                          location.assign(url);
+                        })
+                      }
+                    >
+                      {`Add $${cents / 100}`}
+                    </button>
+                  ))}
+                </p>
+              ) : (
+                <p className="small">Card top-ups are not enabled yet.</p>
+              )}
             </section>
             <details>
               <summary>Agent access</summary>

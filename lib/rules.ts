@@ -4,15 +4,20 @@ export const DAY = 24 * 60 * 60 * 1000;
 export const RETENTION = 30 * DAY;
 export const MAX_STORED_BYTES = 100_000_000_000;
 export const MAX_PENDING_UPLOADS = 3;
-export const MAX_DAILY_TRANSFERS = 20;
-// One tier. Every account, self-serve, gets the same limits; the owner test
-// token is treated the same way. Paid usage will raise these, not gate them.
+export const MONTH = 30 * DAY;
+// Free allowance: a small amount of storage and a handful of transfers per
+// 30 days. Beyond it, each transfer is charged from the account balance at
+// the storage price. The owner test token is never charged.
+export const FREE_STORED_BYTES = 5_000_000_000;
+export const FREE_MONTHLY_TRANSFERS = 20;
+export const TOP_UP_CENTS = [1000, 1500] as const;
 export const LIMITS = {
   max_file_bytes: MAX_BYTES,
   retention_ms: RETENTION,
   max_stored_bytes: MAX_STORED_BYTES,
-  max_daily_transfers: MAX_DAILY_TRANSFERS,
   max_pending_uploads: MAX_PENDING_UPLOADS,
+  free_stored_bytes: FREE_STORED_BYTES,
+  free_transfers_per_30_days: FREE_MONTHLY_TRANSFERS,
 };
 export type Limits = typeof LIMITS;
 export function describeLimits(l: Limits = LIMITS) {
@@ -20,8 +25,12 @@ export function describeLimits(l: Limits = LIMITS) {
     max_file_bytes: l.max_file_bytes,
     max_stored_bytes: l.max_stored_bytes,
     max_pending_uploads: l.max_pending_uploads,
-    max_daily_transfers: l.max_daily_transfers,
+    free_stored_bytes: l.free_stored_bytes,
+    free_transfers_per_30_days: l.free_transfers_per_30_days,
     retention_days: Math.round(l.retention_ms / DAY),
+    price_cents_per_gb: 10,
+    minimum_charge_cents: 25,
+    top_up_cents: [...TOP_UP_CENTS],
   };
 }
 // Priced transfers: the sender names a price in cents; Bilaga keeps a fee when
