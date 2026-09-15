@@ -309,7 +309,7 @@ export default function UploadPanel() {
               </Button>
             ) : null}
             {!file ? (
-              <span className="small">Up to 50 GB · free to send</span>
+              <span className="small">Up to 50 GB · uses your account’s allowance</span>
             ) : null}
           </div>
           {file ? (
@@ -383,7 +383,7 @@ export default function UploadPanel() {
         <span>
           {result
             ? 'Anyone with this link can download.'
-            : 'Sending is free. No payment required.'}
+            : 'Free within your allowance. Pay per use beyond it, never a subscription.'}
         </span>
       </div>
     </div>

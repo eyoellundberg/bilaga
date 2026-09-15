@@ -49,38 +49,43 @@ export default function Home() {
       <section id="pricing" className="pricing">
         <div className="pricing-head">
           <p className="eyebrow">PRICING · USD</p>
-          <h2>Start free. Pay once when you need more.</h2>
+          <h2>Start free. Pay per use, never a subscription.</h2>
         </div>
         <div className="tiers">
           <div className="tier">
             <h3>Free</h3>
             <p className="tier-price">$0</p>
-            <p>5 transfers a month, 5 GB stored. No card.</p>
+            <p>5 transfers a month, files up to 5 GB. No card.</p>
             <a className="tier-link" href="/account">
               Try free <ArrowUpRight size={15} />
             </a>
           </div>
           <div className="tier">
             <h3>Plus</h3>
-            <p className="tier-price">$15</p>
-            <p>$15 of credit. Up to 150 GB of transfers.</p>
+            <p className="tier-price">
+              $15 <span>one-time</span>
+            </p>
+            <p>$15 of credit. Up to 150 GB of transfers, files up to 50 GB.</p>
             <a className="tier-link" href="/account">
-              Get Plus <ArrowUpRight size={15} />
+              Buy once, use anytime <ArrowUpRight size={15} />
             </a>
           </div>
           <div className="tier">
             <h3>Pro</h3>
-            <p className="tier-price">$30</p>
-            <p>$40 of credit. Up to 400 GB of transfers. 25% cheaper per GB.</p>
+            <p className="tier-price">
+              $30 <span>one-time</span>
+            </p>
+            <p>$40 of credit. Up to 400 GB of transfers, files up to 50 GB. 25% cheaper per GB.</p>
             <a className="tier-link" href="/account">
-              Get Pro <ArrowUpRight size={15} />
+              Buy once, use anytime <ArrowUpRight size={15} />
             </a>
           </div>
         </div>
         <p className="pricing-note">
-          Paid once, never a subscription. Transfers cost $0.10 per GB with a
-          $0.25 minimum, and credit lasts 3 years. Every plan: files up to
-          50 GB, 30 days to download, a signed receipt that never expires.
+          Nothing renews and nothing is charged until you send. Paid transfers
+          use $0.10 of credit per GB with a $0.25 minimum, and credit lasts
+          3 years. Every plan: 30 days to download and a signed receipt that
+          never expires.
         </p>
       </section>
       <footer>

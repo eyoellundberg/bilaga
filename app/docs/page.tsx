@@ -82,9 +82,9 @@ export default function Docs() {
           </li>
         </ol>
         <p className="notice">
-          Free: 5 transfers a month, 5 GB stored, files up to 50 GB. Need
-          more? Plus is $15 for up to 150 GB, Pro is $30 for up to 400 GB.
-          Paid once, no subscription.
+          Free: 5 transfers a month, files up to 5 GB. Need more? Plus is
+          $15 for up to 150 GB, Pro is $30 for up to 400 GB, files up to
+          50 GB. Pay per use, never a subscription.
         </p>
         <ConnectAgent />
         <details className="agent-details">
@@ -203,7 +203,7 @@ export default function Docs() {
         <h2>What it costs</h2>
         <p>
           Every account gets 5 transfers per rolling 30 days and 5 GB stored
-          free. Beyond that, a transfer is charged when it is created at $0.10
+          free, so a free file is at most 5 GB. Beyond that, a transfer is charged when it is created at $0.10
           per decimal GB with a $0.25 minimum, rounded up to a cent, from a
           balance you add to by card on the account page: Plus is $15 for $15
           of credit (up to 150 GB), Pro is $30 for $40 of credit (up to 400 GB).

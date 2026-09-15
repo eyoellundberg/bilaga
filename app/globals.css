@@ -287,6 +287,12 @@ h1 span {
   font-weight: 500;
   letter-spacing: -0.2px;
 }
+.tier .tier-price span {
+  font-size: 13px;
+  letter-spacing: 0;
+  color: var(--muted-foreground);
+  margin-left: 4px;
+}
 .tier .tier-price {
   color: var(--foreground);
   font-size: 38px;
