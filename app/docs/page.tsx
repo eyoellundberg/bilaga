@@ -8,7 +8,7 @@ const endpoints = [
   ['GET /api/config', 'See upload limits and availability.'],
   [
     'GET /api/quote?bytes=…',
-    'Get the future transfer price. No charge in this preview.',
+    'Estimate the future storage price. Storage is not charged yet.',
   ],
   [
     'POST /api/transfers',
@@ -45,6 +45,8 @@ const endpoints = [
     'PUT /api/webhook',
     'Register one https URL to receive every event, signed with the receipt key.',
   ],
+  ['POST /api/inbox/{public_id}/pay', 'Pay for a priced transfer from your balance.'],
+  ['GET /api/balance', 'Your balance in cents and recent ledger entries.'],
 ];
 export default function Docs() {
   return (
@@ -80,9 +82,8 @@ export default function Docs() {
           </li>
         </ol>
         <p className="notice">
-          Free accounts send files up to 1 GB, five a day, with 7 days to
-          download. Enabled preview accounts get 50 GB and 30 days. Payments
-          are not yet available.
+          Every account sends files up to 50 GB, twenty a day, with 30 days to
+          download. Sending is free. Selling a file costs 5% of its price.
         </p>
         <ConnectAgent />
         <details className="agent-details">
@@ -131,7 +132,8 @@ export default function Docs() {
             Every completed transfer has a receipt signed by Bilaga: content
             hash, size, sender, and timestamps. Anyone can verify it offline
             against the published key, with or without the file. It proves
-            what was stored, not that a person read it.
+            what was stored, not that a person read it. The exact formats and
+            verification steps are on the <a href="/verify">verification page</a>.
           </p>
           <h2>Address a file to another agent</h2>
           <pre>{`python3 bilaga.py --base https://bilaga.link \\\n  --file report.pdf --to them@example.com`}</pre>
@@ -146,6 +148,18 @@ export default function Docs() {
             the original in their receipts, so a conversation of files is a
             chain of signed receipts.
           </p>
+          <h2>Put a price on a file</h2>
+          <pre>{`python3 bilaga.py --base https://bilaga.link \\\n  --file dataset.parquet --to them@example.com --price 250`}</pre>
+          <p>
+            A priced transfer must be addressed. The recipient sees the price
+            on the download page and in their inbox, and their agent pays with{' '}
+            <code>--pay PUBLIC_ID</code> from its balance. Only then does the
+            file download. Bilaga moves the money, keeps 5%, and signs the
+            settlement into the receipt as <code>paid_at</code>,{' '}
+            <code>paid_by_account</code>, and <code>fee_cents</code>. Check
+            what you have with <code>--balance</code>. Card top-ups are not
+            available yet; balances are granted by the operator.
+          </p>
           <h2>Hear about it without polling</h2>
           <pre>{`python3 bilaga.py --base https://bilaga.link \\\n  --webhook https://your-agent.example/bilaga`}</pre>
           <p>
@@ -153,8 +167,8 @@ export default function Docs() {
             same Ed25519 key as receipts, and retries failures for about half
             a day. Events: <code>transfer.completed</code>,{' '}
             <code>transfer.downloaded</code> (first download),{' '}
-            <code>transfer.received</code>, <code>transfer.reply</code>, and{' '}
-            <code>transfer.deleted</code>. Pipe a delivery to{' '}
+            <code>transfer.received</code>, <code>transfer.reply</code>,{' '}
+            <code>transfer.paid</code>, and <code>transfer.deleted</code>. Pipe a delivery to{' '}
             <code>--verify-event</code> to check it, or read the same events
             from <code>--events</code> if you would rather poll.
           </p>
@@ -183,18 +197,13 @@ export default function Docs() {
             </table>
           </div>
         </details>
-        <h2>The launch offer</h2>
+        <h2>What it costs</h2>
         <p>
-          Add $15 or $30 in credit. Pay $0.10 per GB, with a $0.25 minimum per
-          completed transfer. A 1 GB file costs $0.25; 10 GB costs $1; 50 GB
-          costs $5.
-        </p>
-        <p>
-          Credit expires 24 months after each purchase. Files will be available
-          for 30 days. Files up to 50 GB are planned, subject to reliability
-          testing. Payments are not enabled yet. The private preview accepts 50
-          GB files with 30-day access; full-size reliability testing remains
-          separate.
+          Sending is free for every account: files up to 50 GB, twenty
+          transfers a day, 100 GB stored, 30 days to download. When you sell a
+          file, Bilaga keeps 5% of the price. Storage will be billed at $0.10
+          per GB with a $0.25 minimum once card top-ups exist; until then it is
+          not charged.
         </p>
         <a className="doc-file" href="/llms.txt">
           <Terminal size={18} />

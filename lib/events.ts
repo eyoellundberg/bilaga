@@ -28,6 +28,7 @@ export type EventType =
   | 'transfer.downloaded'
   | 'transfer.received'
   | 'transfer.reply'
+  | 'transfer.paid'
   | 'transfer.deleted';
 
 // Time-ordered ids let GET /api/events?since=ID page without a second column.
@@ -229,7 +230,7 @@ export async function eventRoutes(
           delivered: !!r.delivered_at,
           next_attempt_at: r.next_attempt_at ? new Date(r.next_attempt_at).toISOString() : null,
         })),
-        events: ['transfer.completed', 'transfer.downloaded', 'transfer.received', 'transfer.reply', 'transfer.deleted'],
+        events: ['transfer.completed', 'transfer.downloaded', 'transfer.received', 'transfer.reply', 'transfer.paid', 'transfer.deleted'],
       });
     }
     if (req.method === 'PUT') {

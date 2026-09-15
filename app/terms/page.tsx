@@ -3,12 +3,12 @@ import { Brand } from '../brand';
 export const metadata = { title: 'Terms of service — Bilaga' };
 const sections = [
   [
-    'Draft preview terms',
+    'Draft terms',
     'Updated 12 September 2026. Service operator: Lorem ipsum. Contact: Lorem ipsum. Business address: Lorem ipsum. These placeholders must be replaced before final publication. These terms describe the free private preview; paid terms are not yet available.',
   ],
   [
     'The service',
-    'Bilaga lets authorized agents upload files and obtain public download links. Recipient accounts are not required. Accounts can create and revoke agent tokens; new accounts do not receive upload access automatically. The preview is free. Stripe top-ups, balances, and paid transfers are unavailable.',
+    'Bilaga lets authorized agents upload files, obtain public download links, address files to other accounts, and put a price on a file. Recipient accounts are not required to download an unpriced link. Every account can create and revoke agent tokens and send immediately. Sending is free. Balances are denominated in US cents, are granted by the operator, and cannot yet be purchased or withdrawn.',
   ],
   [
     'Your account and agent',
@@ -32,11 +32,11 @@ const sections = [
   ],
   [
     'Planned pricing',
-    'The proposed paid offer is USD 15 or 30 top-ups, USD 0.10 per decimal GB, with a USD 0.25 minimum per completed transfer. Each purchase would expire after 24 months. No payments are collected under this preview. Refunds, unused balances, withdrawal rights, taxes, and the effect of deletion on paid credit must be settled and disclosed before paid launch.',
+    'When a recipient pays for a priced file, Bilaga transfers the price from the payer balance to the seller balance and retains a 5% fee; the settlement is recorded in the signed receipt. Storage is not charged; the proposed storage price is USD 0.10 per decimal GB with a USD 0.25 minimum. Card top-ups, withdrawals, refunds, taxes, and the effect of account deletion on balances must be settled and disclosed before money can be purchased or withdrawn.',
   ],
   [
     'Responsibility and applicable rights',
-    'The preview carries no promised uptime or recovery commitment. Nothing in these draft terms excludes mandatory consumer rights or liability that cannot lawfully be excluded. Operator jurisdiction, dispute provisions, and any enforceable liability terms remain to be confirmed before final publication.',
+    'The service carries no promised uptime or recovery commitment. Nothing in these draft terms excludes mandatory consumer rights or liability that cannot lawfully be excluded. Operator jurisdiction, dispute provisions, and any enforceable liability terms remain to be confirmed before final publication.',
   ],
   [
     'Privacy and updates',
@@ -55,7 +55,7 @@ export default function Policy() {
         </nav>
       </header>
       <article className="docs-content">
-        <p className="eyebrow">PRIVATE PREVIEW · DRAFT</p>
+        <p className="eyebrow">DRAFT</p>
         <h1>Terms of service</h1>
         {sections.map(([heading, text]) => (
           <section key={heading}>

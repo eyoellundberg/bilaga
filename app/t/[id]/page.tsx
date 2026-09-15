@@ -77,14 +77,21 @@ export default async function Recipient({
                 UTC
               </strong>
             </div>
-            <a
-              className="download-action"
-              href={`/api/download/${id}`}
-              download
-            >
-              <Download size={19} />
-              Download file
-            </a>
+            {transfer.price_cents > 0 && !transfer.paid ? (
+              <a className="download-action" href="/account">
+                <Download size={19} />
+                {`Sign in to pay $${(transfer.price_cents / 100).toFixed(2)} and download`}
+              </a>
+            ) : (
+              <a
+                className="download-action"
+                href={`/api/download/${id}`}
+                download
+              >
+                <Download size={19} />
+                Download file
+              </a>
+            )}
             <p className="small recipient-note">
               Only download files from senders you trust.
             </p>

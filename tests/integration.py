@@ -6,6 +6,11 @@ from urllib.error import HTTPError
 BASE='http://localhost:3119'
 TOKEN=Path('.bilaga-token').read_text().strip()
 checks=0
+# Local suites create dozens of transfers a day with one owner token; forget the purged ones
+# so the daily limit tests the current run rather than the day's history.
+subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config',os.environ.get('BILAGA_TEST_CONFIG','wrangler.cloudflare.json'),'--persist-to','.wrangler/state','--command',
+    "DELETE FROM transfers WHERE state='deleted' AND purged_at IS NOT NULL AND owner='"+hashlib.sha256(TOKEN.encode()).hexdigest()+"'"],
+    env=dict(os.environ,WRANGLER_LOG_PATH='.wrangler/logs'),check=True,stdout=subprocess.DEVNULL)
 
 def request(path,method='GET',body=None,auth=True,headers=None,expect=200):
     global checks

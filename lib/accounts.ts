@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { sha256 } from './hash';
 import { bodyJson, fail, json } from './http';
-import { DAY, TIERS, describeLimits } from './rules';
+import { DAY, describeLimits } from './rules';
 
 const db = () => env.DB;
 const random = () =>
@@ -20,7 +20,50 @@ const settings = () =>
       }): Promise<unknown>;
     };
     AUTH_ORIGIN?: string;
+    GOOGLE_CLIENT_ID?: string;
+    GOOGLE_CLIENT_SECRET?: string;
   };
+// A signed-in browser gets a session cookie; the sign-in page also remembers
+// which method was used last, in a plain cookie the page can read.
+async function establishSession(req: Request, email: string, method: 'email' | 'google') {
+  const id = crypto.randomUUID().replaceAll('-', ''),
+    token = random(),
+    now = Date.now();
+  const results = await db().batch([
+    db()
+      .prepare(
+        'INSERT INTO accounts(id,email,created_at,handle) VALUES(?,?,?,?) ON CONFLICT(email) DO NOTHING',
+      )
+      .bind(id, email, now, `acct_${random().slice(0, 16)}`),
+    db()
+      .prepare(
+        `INSERT INTO sessions(hash,account_id,created_at,expires_at) SELECT ?,id,?,? FROM accounts WHERE email=? AND deleted_at IS NULL RETURNING account_id`,
+      )
+      .bind(await hash(token), now, now + 30 * DAY, email),
+    db()
+      .prepare('UPDATE accounts SET last_login_method=? WHERE email=? AND deleted_at IS NULL')
+      .bind(method, email),
+  ]);
+  if (!results[1].results.length) return null;
+  return { token, method };
+}
+function rememberMethod(req: Request, response: Response, method: string) {
+  const secure = new URL(req.url).protocol === 'https:' ? '; Secure' : '';
+  response.headers.append(
+    'Set-Cookie',
+    `bilaga_last=${method}; Path=/account; SameSite=Lax; Max-Age=${365 * 86400}${secure}`,
+  );
+}
+const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
+function base64url(bytes: Uint8Array) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function decodeJwtPayload(jwt: string) {
+  const part = jwt.split('.')[1] || '';
+  const padded = part.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (part.length % 4)) % 4);
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), (c) => c.charCodeAt(0))));
+}
 function cookieName(req: Request, kind: string) {
   return `${new URL(req.url).protocol === 'https:' ? '__Host-' : ''}bilaga_${kind}`;
 }
@@ -51,15 +94,16 @@ type Session = {
   id: string;
   email: string;
   created_at: number;
-  uploads_enabled: number;
   handle: string | null;
+  balance_cents: number;
+  last_login_method: string | null;
 };
 async function session(req: Request) {
   const token = cookie(req, 'session');
   if (!/^[a-f0-9]{64}$/.test(token))
     return fail(401, 'sign_in', 'Sign in to manage your account.');
   const row = await db()
-    .prepare(`SELECT a.id,a.email,s.created_at,a.uploads_enabled,a.handle FROM sessions s JOIN accounts a ON a.id=s.account_id
+    .prepare(`SELECT a.id,a.email,s.created_at,a.handle,a.balance_cents,a.last_login_method FROM sessions s JOIN accounts a ON a.id=s.account_id
     WHERE s.hash=? AND s.expires_at>? AND a.deleted_at IS NULL`)
     .bind(await hash(token), Date.now())
     .first<Session>();
@@ -103,6 +147,89 @@ export async function accountRoutes(
       'cross_origin',
       'Account changes must come from this website.',
     );
+  if (route === 'auth/methods' && method === 'GET')
+    return json({ email: !!settings().EMAIL, google: !!(settings().GOOGLE_CLIENT_ID && settings().GOOGLE_CLIENT_SECRET) });
+  // Google sign-in: authorization code with PKCE, state bound to this browser.
+  // The id_token comes straight from Google's token endpoint over TLS with the
+  // client secret, so its claims are trusted without a second signature check.
+  if (route === 'auth/google' && method === 'GET') {
+    const { GOOGLE_CLIENT_ID } = settings();
+    if (!GOOGLE_CLIENT_ID || !settings().GOOGLE_CLIENT_SECRET)
+      return fail(503, 'google_unavailable', 'Google sign-in is not configured.');
+    await limit(`login-ip:${await hash(req.headers.get('CF-Connecting-IP') || 'local')}`, 5);
+    const state = random(),
+      verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+    const challenge = base64url(
+      new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))),
+    );
+    const target = new URL(GOOGLE_AUTH);
+    target.search = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: `${origin}/api/auth/google/callback`,
+      response_type: 'code',
+      scope: 'openid email',
+      state,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      prompt: 'select_account',
+    }).toString();
+    const response = new Response(null, { status: 302, headers: { Location: target.toString() } });
+    setCookie(req, response, 'oauth', `${state}.${verifier}`, 600);
+    return response;
+  }
+  if (route === 'auth/google/callback' && method === 'GET') {
+    const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = settings();
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET)
+      return fail(503, 'google_unavailable', 'Google sign-in is not configured.');
+    await limit(`verify:${await hash(req.headers.get('CF-Connecting-IP') || 'local')}`, 20);
+    const params = new URL(req.url).searchParams;
+    const [state, verifier] = cookie(req, 'oauth').split('.');
+    const back = (message: string) =>
+      new Response(null, {
+        status: 303,
+        headers: { Location: `${origin}/account#error=${encodeURIComponent(message)}` },
+      });
+    if (params.get('error')) return back('Google sign-in was cancelled.');
+    if (!state || !verifier || params.get('state') !== state || !params.get('code'))
+      return back('Sign-in did not match this browser. Try again.');
+    let claims: { aud?: string; iss?: string; email?: string; email_verified?: boolean; exp?: number };
+    try {
+      const res = await fetch(GOOGLE_TOKEN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code: params.get('code')!,
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
+          redirect_uri: `${origin}/api/auth/google/callback`,
+          grant_type: 'authorization_code',
+          code_verifier: verifier,
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const data = (await res.json()) as { id_token?: string };
+      if (!res.ok || !data.id_token) throw new Error('token exchange failed');
+      claims = decodeJwtPayload(data.id_token);
+    } catch {
+      return back('Google did not confirm the sign-in. Try again.');
+    }
+    const email = (claims.email || '').trim().toLowerCase();
+    if (
+      claims.aud !== GOOGLE_CLIENT_ID ||
+      !['https://accounts.google.com', 'accounts.google.com'].includes(claims.iss || '') ||
+      claims.email_verified !== true ||
+      !email ||
+      (claims.exp && claims.exp * 1000 < Date.now())
+    )
+      return back('Google returned an account without a verified email.');
+    const established = await establishSession(req, email, 'google');
+    if (!established) return back('Your account changed. Try again.');
+    const response = new Response(null, { status: 303, headers: { Location: `${origin}/account` } });
+    setCookie(req, response, 'session', established.token, 30 * 86400);
+    setCookie(req, response, 'oauth', '', 0);
+    rememberMethod(req, response, 'google');
+    return response;
+  }
   if (route === 'auth/request' && method === 'POST') {
     if (!settings().EMAIL)
       return fail(
@@ -203,30 +330,17 @@ export async function accountRoutes(
         'invalid_link',
         'This link expired or was already used. Request a new one.',
       );
-    const id = crypto.randomUUID().replaceAll('-', ''),
-      token = random(),
-      now = Date.now();
-    const results = await db().batch([
-      db()
-        .prepare(
-          'INSERT INTO accounts(id,email,created_at,handle) VALUES(?,?,?,?) ON CONFLICT(email) DO NOTHING',
-        )
-        .bind(id, link.email, now, `acct_${random().slice(0, 16)}`),
-      db()
-        .prepare(
-          `INSERT INTO sessions(hash,account_id,created_at,expires_at) SELECT ?,id,?,? FROM accounts WHERE email=? AND deleted_at IS NULL RETURNING account_id`,
-        )
-        .bind(await hash(token), now, now + 30 * DAY, link.email),
-    ]);
-    if (!results[1].results.length)
+    const established = await establishSession(req, link.email, 'email');
+    if (!established)
       return fail(
         409,
         'account_changed',
         'Your account changed. Request a new sign-in link.',
       );
     const response = json({ signed_in: true });
-    setCookie(req, response, 'session', token, 30 * 86400);
+    setCookie(req, response, 'session', established.token, 30 * 86400);
     setCookie(req, response, 'login', '', 0);
+    rememberMethod(req, response, 'email');
     return response;
   }
   if (route === 'auth/logout' && method === 'POST') {
@@ -264,9 +378,10 @@ export async function accountRoutes(
       handle: account.handle,
       inbox_count: inbox?.n ?? 0,
       webhook_url: hook?.url ?? null,
-      uploads_enabled: !!account.uploads_enabled,
-      limits: describeLimits(account.uploads_enabled ? TIERS.full : TIERS.free),
-      billing: 'not_available',
+      balance_cents: account.balance_cents,
+      last_login_method: account.last_login_method,
+      limits: describeLimits(),
+      billing: 'balance_grants_only',
       tokens,
     });
   }
@@ -335,7 +450,7 @@ export async function accountRoutes(
     await db().batch([
       db()
         .prepare(
-          'UPDATE accounts SET email=NULL,deleted_at=?,uploads_enabled=0 WHERE id=?',
+          'UPDATE accounts SET email=NULL,deleted_at=?,uploads_enabled=0,last_login_method=NULL WHERE id=?',
         )
         .bind(Date.now(), account.id),
       db().prepare('DELETE FROM sessions WHERE account_id=?').bind(account.id),

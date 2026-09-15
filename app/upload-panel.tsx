@@ -309,7 +309,7 @@ export default function UploadPanel() {
               </Button>
             ) : null}
             {!file ? (
-              <span className="small">Up to 50 GB · private preview</span>
+              <span className="small">Up to 50 GB · free to send</span>
             ) : null}
           </div>
           {file ? (
@@ -383,7 +383,7 @@ export default function UploadPanel() {
         <span>
           {result
             ? 'Anyone with this link can download.'
-            : 'Private preview. No payment required.'}
+            : 'Sending is free. No payment required.'}
         </span>
       </div>
     </div>

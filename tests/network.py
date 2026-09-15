@@ -119,6 +119,39 @@ assert [e['event']['type'] for e in bearer(ta,'events?type=transfer.reply')['eve
 bearer(ta,'events?since=bogus',expect=400)
 assert bearer(tb,'events')['events'][0]['event']['type']=='transfer.completed'
 
+# Priced transfers: addressed only, paid from balance, settled with a fee, downloadable only after payment.
+OWNER=open('.bilaga-token').read().strip()
+bearer(ta,'transfers','POST',{'filename':'x.txt','size_bytes':1,'price_cents':250},expect=400)
+bearer(ta,'transfers','POST',{'filename':'x.txt','size_bytes':1,'to':b_email,'price_cents':-1},expect=400)
+request('/api/transfers','POST',{'filename':'x.txt','size_bytes':1,'to':b_email,'price_cents':250},expect=403)
+request('/api/credits','POST',{'email':b_email,'cents':300},headers={'Authorization':'Bearer '+tb},expect=403)
+request('/api/credits','POST',{'email':'nobody@example.invalid','cents':300},expect=404)
+grant,_=request('/api/credits','POST',{'email':b_email,'cents':300,'note':'test grant'}); assert grant['balance_cents']==300
+priced = upload(ta,'paid.bin',b'secret',to=b_email,price_cents=250)
+ppid = priced['share_url'].rsplit('/',1)[1]
+assert priced['price_cents']==250 and priced['paid'] is False
+request('/api/download/'+ppid,auth=False,expect=402)
+request('/api/download/'+ppid,auth=False,headers={'Authorization':'Bearer '+tb},expect=402)
+page,_=request('/t/'+ppid,auth=False); assert b'2.50' in page
+entry=[t for t in bearer(tb,'inbox')['transfers'] if t['public_id']==ppid][0]; assert entry['pay_url'] and entry['paid'] is False
+bearer(ta,'inbox/'+ppid+'/pay','POST',expect=404)
+bearer(tb,'inbox/'+pid+'/pay','POST',expect=409)
+sql(f"UPDATE accounts SET balance_cents=100 WHERE email='{b_email}'")
+bearer(tb,'inbox/'+ppid+'/pay','POST',expect=402)
+sql(f"UPDATE accounts SET balance_cents=300 WHERE email='{b_email}'")
+paid = bearer(tb,'inbox/'+ppid+'/pay','POST'); assert paid['paid'] is True and paid['paid_at'] and paid['received_at'] and paid['pay_url'] is None
+assert bearer(tb,'inbox/'+ppid+'/pay','POST')['paid_at']==paid['paid_at']
+body,_=request('/api/download/'+ppid,auth=False); assert body==b'secret'
+bal_b = bearer(tb,'balance'); bal_a = bearer(ta,'balance')
+assert bal_b['balance_cents']==50 and bal_a['balance_cents']==238, (bal_b['balance_cents'],bal_a['balance_cents'])
+assert bal_b['ledger'][0]['kind']=='payment' and bal_b['ledger'][0]['delta_cents']==-250 and bal_a['ledger'][0]['kind']=='sale' and bal_a['ledger'][0]['delta_cents']==238
+assert sql("SELECT sum(delta_cents) AS s FROM ledger WHERE kind='fee' AND account_id='bilaga'")[0]['s']>=12
+if signed:
+    r=request('/api/receipts/'+ppid,auth=False)[0]['receipt']; assert r['price_cents']==250 and r['fee_cents']==12 and r['paid_by_account']==b_acct['handle'] and r['recipient_account']==b_acct['handle']
+paid_event = wait_for('transfer.paid',public_id=ppid)[0]['body']['event']; assert paid_event['transfer']['paid_by']==b_acct['handle'] and paid_event['transfer']['net_cents']==238
+assert [e['event']['type'] for e in bearer(tb,'events?type=transfer.paid')['events']]==['transfer.paid']
+bearer(ta,'transfers/'+priced['id'],'DELETE')
+
 # A failing endpoint is retried later, not dropped; removing the webhook stops retries.
 bearer(tb,'webhook','PUT',{'url':'http://127.0.0.1:3120/broken'})
 bearer(tb,'transfers/'+reply['id'],'DELETE')

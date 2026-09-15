@@ -4,38 +4,19 @@ export const DAY = 24 * 60 * 60 * 1000;
 export const RETENTION = 30 * DAY;
 export const MAX_STORED_BYTES = 100_000_000_000;
 export const MAX_PENDING_UPLOADS = 3;
-export const MAX_DAILY_TRANSFERS = 100;
-export type Tier = 'free' | 'full';
-export type Limits = {
-  tier: Tier;
-  max_file_bytes: number;
-  retention_ms: number;
-  max_stored_bytes: number;
-  max_daily_transfers: number;
-  max_pending_uploads: number;
+export const MAX_DAILY_TRANSFERS = 20;
+// One tier. Every account, self-serve, gets the same limits; the owner test
+// token is treated the same way. Paid usage will raise these, not gate them.
+export const LIMITS = {
+  max_file_bytes: MAX_BYTES,
+  retention_ms: RETENTION,
+  max_stored_bytes: MAX_STORED_BYTES,
+  max_daily_transfers: MAX_DAILY_TRANSFERS,
+  max_pending_uploads: MAX_PENDING_UPLOADS,
 };
-// Free accounts are self-serve and need no approval. Full accounts are enabled by hand.
-export const TIERS: Record<Tier, Limits> = {
-  free: {
-    tier: 'free',
-    max_file_bytes: 1_000_000_000,
-    retention_ms: 7 * DAY,
-    max_stored_bytes: 2_000_000_000,
-    max_daily_transfers: 5,
-    max_pending_uploads: 1,
-  },
-  full: {
-    tier: 'full',
-    max_file_bytes: MAX_BYTES,
-    retention_ms: RETENTION,
-    max_stored_bytes: MAX_STORED_BYTES,
-    max_daily_transfers: MAX_DAILY_TRANSFERS,
-    max_pending_uploads: MAX_PENDING_UPLOADS,
-  },
-};
-export function describeLimits(l: Limits) {
+export type Limits = typeof LIMITS;
+export function describeLimits(l: Limits = LIMITS) {
   return {
-    tier: l.tier,
     max_file_bytes: l.max_file_bytes,
     max_stored_bytes: l.max_stored_bytes,
     max_pending_uploads: l.max_pending_uploads,
@@ -43,6 +24,13 @@ export function describeLimits(l: Limits) {
     retention_days: Math.round(l.retention_ms / DAY),
   };
 }
+// Priced transfers: the sender names a price in cents; Bilaga keeps a fee when
+// it settles. Balances are integer cents and never go negative.
+export const MAX_PRICE_CENTS = 1_000_000;
+export const FEE_BPS = 500;
+export const feeCents = (price: number) => Math.floor((price * FEE_BPS) / 10_000);
+export const validPrice = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= MAX_PRICE_CENTS;
 export function quoteCents(bytes: number) {
   return Math.max(25, Math.ceil((bytes / 1_000_000_000) * 10));
 }

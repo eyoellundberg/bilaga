@@ -3,7 +3,7 @@ import { Brand } from '../brand';
 export const metadata = { title: 'Privacy policy — Bilaga' };
 const sections = [
   [
-    'Draft preview notice',
+    'Draft notice',
     'Updated 12 September 2026. Operator: Lorem ipsum. Contact: Lorem ipsum. Business address: Lorem ipsum. These are placeholders; operator details and provider arrangements must be confirmed before this notice is published as final.',
   ],
   [
@@ -36,7 +36,7 @@ const sections = [
   ],
   [
     'Changes',
-    'We will date policy updates and communicate material changes where appropriate. Paid billing is not available in this preview; payment-data disclosures will be added before billing launches.',
+    'We will date policy updates and communicate material changes where appropriate. Balances are operator-granted credits recorded in an account ledger; card payment data is not collected, and payment-data disclosures will be added before card top-ups launch.',
   ],
 ];
 export default function Policy() {
@@ -51,7 +51,7 @@ export default function Policy() {
         </nav>
       </header>
       <article className="docs-content">
-        <p className="eyebrow">PRIVATE PREVIEW · DRAFT</p>
+        <p className="eyebrow">DRAFT</p>
         <h1>Privacy policy</h1>
         {sections.map(([heading, text]) => (
           <section key={heading}>

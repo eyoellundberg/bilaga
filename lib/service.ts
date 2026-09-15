@@ -8,9 +8,11 @@ import {
   MAX_BYTES,
   PART_BYTES,
   DAY,
-  TIERS,
-  type Limits,
+  LIMITS,
   describeLimits,
+  feeCents,
+  validPrice,
+  FEE_BPS,
   fileLabel,
   quoteCents,
   validSize,
@@ -47,6 +49,9 @@ type Transfer = {
   received_at: number | null;
   received_by: string | null;
   in_reply_to: string | null;
+  price_cents: number;
+  paid_at: number | null;
+  paid_by: string | null;
 };
 type AccountIdentity = { id: string; email: string | null; handle: string | null };
 const EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i;
@@ -109,15 +114,49 @@ async function rateLimit(scope: string, limit: number, window = 60_000) {
       'Too many requests. Wait a minute before retrying.',
     );
 }
-// Owner test tokens and hand-enabled accounts get full limits; everyone else is free tier.
-async function limitsFor(owner: string): Promise<Limits> {
-  if (owner.length === 64) return TIERS.full;
+// One tier for everyone. The lookup still confirms the account is live.
+async function limitsFor(owner: string) {
+  if (owner.length === 64) return LIMITS;
   const account = await db()
-    .prepare('SELECT uploads_enabled FROM accounts WHERE id=? AND deleted_at IS NULL')
+    .prepare('SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL')
     .bind(owner)
-    .first<{ uploads_enabled: number }>();
+    .first();
   if (!account) return fail(401, 'unauthorized', 'A valid Bilaga token is required.');
-  return account.uploads_enabled ? TIERS.full : TIERS.free;
+  return LIMITS;
+}
+// Settle a priced transfer inside one D1 batch. Every statement is guarded by
+// the same condition, so either all of it applies or none of it does.
+async function settle(t: Transfer, payer: AccountIdentity) {
+  const now = Date.now(),
+    fee = feeCents(t.price_cents),
+    net = t.price_cents - fee;
+  const paidMark = db()
+    .prepare(
+      `UPDATE transfers SET paid_at=?,paid_by=? WHERE id=? AND paid_at IS NULL AND state='complete' AND expires_at>? AND price_cents=?
+       AND (SELECT balance_cents FROM accounts WHERE id=? AND deleted_at IS NULL)>=? RETURNING id`,
+    )
+    .bind(now, payer.id, t.id, now, t.price_cents, payer.id, t.price_cents);
+  const guard = `EXISTS(SELECT 1 FROM transfers WHERE id='${t.id}' AND paid_by='${payer.id}' AND paid_at=${now})`;
+  const row = (kind: string, account: string, delta: number, note: string | null) =>
+    db()
+      .prepare(
+        `INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
+         SELECT ?,?,?,COALESCE((SELECT balance_cents FROM accounts WHERE id=?),0),?,?,?,? WHERE ${guard}`,
+      )
+      .bind(crypto.randomUUID().replaceAll('-', ''), account, delta, account, kind, t.id, note, now);
+  const results = await db().batch([
+    paidMark,
+    db()
+      .prepare(`UPDATE accounts SET balance_cents=balance_cents-? WHERE id=? AND ${guard}`)
+      .bind(t.price_cents, payer.id),
+    row('payment', payer.id, -t.price_cents, `Paid for ${t.filename}`),
+    db()
+      .prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND deleted_at IS NULL AND ${guard}`)
+      .bind(net, t.owner),
+    row('sale', t.owner, net, `Sold ${t.filename} (fee ${fee} cents)`),
+    row('fee', 'bilaga', fee, null),
+  ]);
+  return results[0].results.length > 0;
 }
 async function owned(id: string, owner: string) {
   const t = await db()
@@ -144,6 +183,8 @@ function publicData(t: Transfer) {
     sender: t.sender,
     addressed: !!t.recipient,
     in_reply_to: t.in_reply_to,
+    price_cents: t.price_cents,
+    paid: t.price_cents > 0 ? !!t.paid_at : null,
     expires_at: iso(t.expires_at),
     status:
       t.state === 'deleted'
@@ -173,9 +214,10 @@ function privateData(t: Transfer, origin: string) {
     content_hash_algorithm: t.content_hash ? CONTENT_HASH_ALGORITHM : null,
     to: t.recipient,
     received_at: iso(t.received_at),
-    estimated_price_usd: quoteCents(t.size) / 100,
+    paid_at: iso(t.paid_at),
+    estimated_storage_price_usd: quoteCents(t.size) / 100,
     charged_usd: 0,
-    billing: 'preview_no_charge',
+    billing: 'storage_not_charged',
     part_size_bytes: PART_BYTES,
   };
 }
@@ -195,6 +237,8 @@ function eventData(t: Transfer, origin: string) {
     completed_at: iso(t.completed_at),
     expires_at: iso(t.expires_at),
     received_at: iso(t.received_at),
+    price_cents: t.price_cents,
+    paid_at: iso(t.paid_at),
     download_requests: t.download_requests,
   };
 }
@@ -206,6 +250,8 @@ async function inboxData(t: Transfer, origin: string) {
     from_account: await handleOf(t.owner),
     completed_at: iso(t.completed_at),
     received_at: iso(t.received_at),
+    paid_at: iso(t.paid_at),
+    pay_url: t.price_cents > 0 && !t.paid_at ? `${origin}/api/inbox/${t.public_id}/pay` : null,
     share_url: `${origin}/t/${t.public_id}`,
     download_url: `${origin}/api/download/${t.public_id}`,
     receipt_url: t.content_hash ? `${origin}/api/receipts/${t.public_id}` : null,
@@ -320,6 +366,10 @@ async function receipt(id: string) {
     recipient_account: t.received_by ? await handleOf(t.received_by) : null,
     received_at: iso(t.received_at),
     in_reply_to: t.in_reply_to,
+    price_cents: t.price_cents,
+    fee_cents: t.paid_at ? feeCents(t.price_cents) : null,
+    paid_at: iso(t.paid_at),
+    paid_by_account: t.paid_by ? await handleOf(t.paid_by) : null,
     completed_at: iso(t.completed_at),
     expires_at: iso(t.expires_at),
     sent_reported_at: iso(t.sent_at),
@@ -340,6 +390,12 @@ async function download(req: Request, id: string) {
     return fail(404, 'not_found', 'This file is unavailable.');
   if (t.expires_at <= Date.now())
     return fail(410, 'expired', 'This link has expired.');
+  if (t.price_cents > 0 && !t.paid_at)
+    return fail(
+      402,
+      'payment_required',
+      `This file costs ${(t.price_cents / 100).toFixed(2)} USD. Sign in with the address it was sent to and pay from your balance, or ask your agent to POST /api/inbox/{public_id}/pay.`,
+    );
   // Force downloads; never execute uploaded HTML or SVG on our origin.
   const headers = new Headers({
     'Content-Type': 'application/octet-stream',
@@ -438,31 +494,16 @@ export async function handleApi(req: Request) {
           'Cross-origin changes are not allowed.',
         );
     }
-    if (p.length === 1 && p[0] === 'waitlist') {
-      if (method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST.');
-      if (req.headers.get('Origin') !== u.origin)
-        return fail(403, 'cross_origin', 'Join from the Bilaga website.');
-      await rateLimit(`waitlist:${await sha256(new TextEncoder().encode(req.headers.get('CF-Connecting-IP') || 'local'))}`, 5);
-      const body = await bodyJson(req);
-      const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
-      if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-        return fail(400, 'invalid_email', 'Enter a valid email address.');
-      if (!body?.website) {
-        await db().prepare('INSERT INTO waitlist(email,created_at) VALUES(?,?) ON CONFLICT(email) DO NOTHING')
-          .bind(email, Date.now()).run();
-      }
-      return json({ message: 'You’re on the list. We’ll email you when Bilaga is ready.' });
-    }
     const accountResponse = await accountRoutes(req, p, rateLimit);
     if (accountResponse) return accountResponse;
     if (p.length === 1 && p[0] === 'config' && method === 'GET')
       return json({
-        mode: 'private_preview',
-        ...describeLimits(TIERS.full),
-        tiers: { free: describeLimits(TIERS.free), full: describeLimits(TIERS.full) },
+        mode: 'open',
+        ...describeLimits(),
         part_size_bytes: PART_BYTES,
         receipts: (await publicKeyInfo()) ? 'signed_ed25519' : 'unavailable',
-        billing: 'preview_no_charge',
+        billing: 'storage_not_charged',
+        payments: { transfer_prices: 'balance', fee_bps: FEE_BPS, top_ups: 'operator_grant_only' },
         auth: 'magic_link_and_bearer_token',
         signals: 'polling_events_webhooks',
         addressing: 'email',
@@ -482,15 +523,20 @@ export async function handleApi(req: Request) {
         currency: 'USD',
         charged_usd: 0,
         upload_allowed: bytes <= MAX_BYTES,
-        free_tier_allowed: bytes <= TIERS.free.max_file_bytes,
         max_file_bytes: MAX_BYTES,
-        billing: 'preview_no_charge',
+        billing: 'storage_not_charged',
       });
     }
     if (p.length === 1 && p[0] === 'receipt-key' && method === 'GET') {
       const info = await publicKeyInfo();
       if (!info) return fail(503, 'receipts_unavailable', 'Receipt signing is not configured.');
-      return json({ ...info, issuer: 'bilaga.link', content_hash_algorithm: CONTENT_HASH_ALGORITHM });
+      return json({
+        ...info,
+        issuer: 'bilaga.link',
+        content_hash_algorithm: CONTENT_HASH_ALGORITHM,
+        retired_key_ids: [],
+        spec_url: `${u.origin}/verify`,
+      });
     }
     if (
       p.length === 2 &&
@@ -510,6 +556,48 @@ export async function handleApi(req: Request) {
       return await download(req, p[1]);
     const owner = await authorize(req);
     await rateLimit(`owner:${owner}`, 300);
+    // Until card top-ups exist, the operator token grants credit by email.
+    if (p.length === 1 && p[0] === 'credits' && method === 'POST') {
+      if (owner !== bindings().BILAGA_TOKEN_HASH)
+        return fail(403, 'forbidden', 'Owner access required.');
+      const body = await bodyJson(req);
+      const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+      const cents = body?.cents;
+      if (!EMAIL.test(email) || !Number.isInteger(cents) || cents <= 0 || cents > 10_000_000)
+        return fail(400, 'invalid_grant', 'Send an email and a positive integer number of cents.');
+      const now = Date.now();
+      const account = await db()
+        .prepare('UPDATE accounts SET balance_cents=balance_cents+? WHERE email=? AND deleted_at IS NULL RETURNING id,balance_cents,handle')
+        .bind(cents, email)
+        .first<{ id: string; balance_cents: number; handle: string }>();
+      if (!account) return fail(404, 'not_found', 'No account has that email.');
+      await db()
+        .prepare('INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at) VALUES (?,?,?,?,?,NULL,?,?)')
+        .bind(crypto.randomUUID().replaceAll('-', ''), account.id, cents, account.balance_cents, 'grant', typeof body.note === 'string' ? body.note.slice(0, 120) : null, now)
+        .run();
+      return json({ account: account.handle, balance_cents: account.balance_cents });
+    }
+    if (p.length === 1 && p[0] === 'balance' && method === 'GET') {
+      const me = await accountIdentity(owner);
+      if (!me) return fail(403, 'account_required', 'Balances need an account token.');
+      const balance = await db()
+        .prepare('SELECT balance_cents FROM accounts WHERE id=?')
+        .bind(me.id)
+        .first<{ balance_cents: number }>();
+      const rows = (
+        await db()
+          .prepare('SELECT delta_cents,balance_after,kind,transfer_id,note,created_at FROM ledger WHERE account_id=? ORDER BY created_at DESC LIMIT 50')
+          .bind(me.id)
+          .all<{ delta_cents: number; balance_after: number; kind: string; transfer_id: string | null; note: string | null; created_at: number }>()
+      ).results;
+      return json({
+        account: me.handle,
+        balance_cents: balance?.balance_cents ?? 0,
+        currency: 'USD',
+        top_ups: 'Card top-ups are not available yet; credit is granted by the operator.',
+        ledger: rows.map((r) => ({ ...r, created_at: iso(r.created_at) })),
+      });
+    }
     if (p.length === 1 && p[0] === 'cleanup' && method === 'POST') {
       if (owner !== bindings().BILAGA_TOKEN_HASH)
         return fail(403, 'forbidden', 'Owner access required.');
@@ -534,6 +622,34 @@ export async function handleApi(req: Request) {
           account: me.handle,
           transfers: await Promise.all(rows.map((t) => inboxData(t, u.origin))),
         });
+      }
+      if (p.length === 3 && /^[a-f0-9]{32}$/.test(p[1]) && p[2] === 'pay' && method === 'POST') {
+        await rateLimit(`pay:${me.id}`, 30);
+        const t = await db()
+          .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
+          .bind(p[1], me.email)
+          .first<Transfer>();
+        if (!t) return fail(404, 'not_found', 'No transfer addressed to you has that id.');
+        if (t.expires_at <= Date.now()) return fail(410, 'expired', 'This transfer has expired.');
+        if (t.price_cents === 0) return fail(409, 'not_priced', 'This transfer is free.');
+        if (t.paid_at) {
+          if (t.paid_by !== me.id) return fail(409, 'already_paid', 'Someone else already paid for this transfer.');
+        } else {
+          const balance = await db()
+            .prepare('SELECT balance_cents FROM accounts WHERE id=?')
+            .bind(me.id)
+            .first<{ balance_cents: number }>();
+          if ((balance?.balance_cents ?? 0) < t.price_cents)
+            return fail(402, 'insufficient_balance', `Your balance is ${balance?.balance_cents ?? 0} cents; this transfer costs ${t.price_cents}.`);
+          if (!(await settle(t, me)))
+            return fail(409, 'payment_conflict', 'The transfer was paid or changed concurrently. Check the inbox again.');
+          const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
+          await recordEvent(t.owner, 'transfer.paid', { ...eventData(fresh, u.origin), paid_by: me.handle, net_cents: t.price_cents - feeCents(t.price_cents) });
+          await recordEvent(me.id, 'transfer.paid', { ...(await inboxData(fresh, u.origin)), paid_by: me.handle });
+          await markReceived(fresh, me, u.origin);
+        }
+        const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
+        return json(await inboxData(fresh, u.origin));
       }
       if (p.length === 3 && /^[a-f0-9]{32}$/.test(p[1]) && p[2] === 'received' && method === 'POST') {
         const t = await db()
@@ -566,11 +682,7 @@ export async function handleApi(req: Request) {
           'Files must be between 1 byte and 50 GB.',
         );
       if (body.size_bytes > limits.max_file_bytes)
-        return fail(
-          413,
-          'tier_limit',
-          `Free accounts accept files up to ${fileLabel(limits.max_file_bytes)}. Larger transfers need a full account.`,
-        );
+        return fail(413, 'too_large', `Files can be at most ${fileLabel(limits.max_file_bytes)}.`);
       let filename: string;
       try {
         filename = cleanFilename(body.filename);
@@ -616,14 +728,24 @@ export async function handleApi(req: Request) {
           recipient = sender.email;
         }
       }
+      let price = 0;
+      if (body.price_cents !== undefined && body.price_cents !== null) {
+        if (!validPrice(body.price_cents))
+          return fail(400, 'invalid_price', 'price_cents must be an integer between 0 and 1,000,000.');
+        price = body.price_cents;
+        if (price > 0 && !recipient)
+          return fail(400, 'price_needs_recipient', 'A priced transfer must be addressed with `to`.');
+        if (price > 0 && owner.length === 64)
+          return fail(403, 'account_required', 'Priced transfers need an account token.');
+      }
       await cleanup();
       const id = crypto.randomUUID().replaceAll('-', ''),
         publicId = crypto.randomUUID().replaceAll('-', ''),
         now = Date.now();
       // Reserve quota and the record atomically BEFORE allocating any storage.
       const reservation = await db()
-        .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,state,created_at,expires_at)
-      SELECT ?,?,?,?,?,?,?,?,'initializing',?,? WHERE
+        .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,price_cents,state,created_at,expires_at)
+      SELECT ?,?,?,?,?,?,?,?,?,'initializing',?,? WHERE
       (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)) AND
       (SELECT count(*) FROM transfers WHERE owner=? AND created_at>?) < ? AND
       (SELECT count(*) FROM transfers WHERE owner=? AND state IN ('initializing','uploading','completing') AND purged_at IS NULL) < ? AND
@@ -637,6 +759,7 @@ export async function handleApi(req: Request) {
           body.sender || null,
           recipient,
           inReplyTo,
+          price,
           now,
           now + DAY,
           owner,
@@ -654,8 +777,8 @@ export async function handleApi(req: Request) {
       if (!reservation)
         return fail(
           429,
-          'preview_limit',
-          `Limit reached for your ${limits.tier} account: ${limits.max_daily_transfers} transfers per day, ${limits.max_pending_uploads} unfinished upload${limits.max_pending_uploads === 1 ? '' : 's'}, or ${fileLabel(limits.max_stored_bytes)} reserved storage.`,
+          'account_limit',
+          `Limit reached: ${limits.max_daily_transfers} transfers per day, ${limits.max_pending_uploads} unfinished upload${limits.max_pending_uploads === 1 ? '' : 's'}, or ${fileLabel(limits.max_stored_bytes)} reserved storage.`,
         );
       let multi: R2MultipartUpload | undefined;
       try {
@@ -859,6 +982,7 @@ export async function handleApi(req: Request) {
             sender: t.sender,
             from_account: await handleOf(owner),
             in_reply_to: t.in_reply_to,
+            price_cents: t.price_cents,
             content_hash: t.content_hash,
             share_url: `${u.origin}/t/${t.public_id}`,
             receipt_url: `${u.origin}/api/receipts/${t.public_id}`,

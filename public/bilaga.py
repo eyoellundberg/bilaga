@@ -30,11 +30,14 @@ actions.add_argument('--received', metavar='PUBLIC_ID', help='Acknowledge a tran
 actions.add_argument('--events', action='store_true', help='Read your signed event feed; use --since to page')
 actions.add_argument('--webhook', metavar='URL', help='Register an https webhook for signed events (or "off" to remove, "show" to inspect, "test" to send a test event)')
 actions.add_argument('--verify-event', action='store_true', help='Verify a signed event JSON body from stdin against the published key')
+actions.add_argument('--pay', metavar='PUBLIC_ID', help='Pay for a priced transfer addressed to you from your balance, then it can be downloaded')
+actions.add_argument('--balance', action='store_true', help='Show your balance and recent ledger')
 parser.add_argument('--resume', help='Resume a known upload ID; use with the same --file')
 parser.add_argument('--verify', type=Path, metavar='DOWNLOADED_FILE', help='With --receipt: check a downloaded file against the receipt')
 parser.add_argument('--to', metavar='EMAIL', help='With --file: address the transfer to a recipient; it appears in their inbox')
 parser.add_argument('--reply-to', metavar='PUBLIC_ID', help='With --file: reply to a transfer you received; --to defaults to its sender')
 parser.add_argument('--sender', help='With --file: a display label for the sender')
+parser.add_argument('--price', type=int, metavar='CENTS', help='With --file and --to: charge the recipient this many US cents before download')
 parser.add_argument('--out', type=Path, help='With --download: where to save (default: the original filename in the current directory)')
 parser.add_argument('--since', metavar='EVENT_ID', help='With --events: return events after this id')
 args=parser.parse_args()
@@ -162,6 +165,10 @@ try:
         result=api('inbox')
     elif args.received:
         result=api('inbox/'+args.received+'/received','POST',retry=True)
+    elif args.pay:
+        result=api('inbox/'+args.pay+'/pay','POST')
+    elif args.balance:
+        result=api('balance')
     elif args.events:
         result=api('events'+('?since='+args.since if args.since else ''))
     elif args.webhook:
@@ -190,6 +197,7 @@ try:
             if args.to:create['to']=args.to
             if args.reply_to:create['in_reply_to']=args.reply_to
             if args.sender:create['sender']=args.sender
+            if args.price is not None:create['price_cents']=args.price
             transfer=api('transfers','POST',create)
         tid=transfer['id']
         print('Transfer ID: '+tid+' (use --resume with the same unchanged file if interrupted)',file=sys.stderr)

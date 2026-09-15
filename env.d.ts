@@ -4,5 +4,7 @@ declare namespace Cloudflare {
     FILES: R2Bucket;
     BILAGA_TOKEN_HASH?: string;
     RECEIPT_SIGNING_KEY?: string;
+    GOOGLE_CLIENT_ID?: string;
+    GOOGLE_CLIENT_SECRET?: string;
   }
 }

@@ -5,12 +5,12 @@ import { Brand } from '../brand';
 
 type Account = {
   email: string;
-  uploads_enabled: boolean;
   handle: string | null;
+  balance_cents: number;
+  last_login_method: string | null;
   inbox_count: number;
   webhook_url: string | null;
   limits: {
-    tier: 'free' | 'full';
     max_file_bytes: number;
     max_stored_bytes: number;
     max_daily_transfers: number;
@@ -27,6 +27,8 @@ export default function AccountPage() {
   const [agentToken, setAgentToken] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(true);
+  const [methods, setMethods] = useState<{ email: boolean; google: boolean }>({ email: true, google: false });
+  const [lastUsed, setLastUsed] = useState<'email' | 'google' | ''>('');
   async function api<T = { message: string; token: string }>(
     path: string,
     method: string = 'GET',
@@ -51,6 +53,22 @@ export default function AccountPage() {
       }
     };
     readLogin();
+    const failure = new URLSearchParams(location.hash.slice(1)).get('error');
+    if (failure) {
+      queueMicrotask(() => setMessage(failure));
+      history.replaceState(null, '', '/account');
+    }
+    try {
+      const last = document.cookie.match(/(?:^|; )bilaga_last=(email|google)/)?.[1];
+      if (last) queueMicrotask(() => setLastUsed(last as 'email' | 'google'));
+    } catch {
+      // Cookie access can be blocked; the hint is optional.
+    }
+    fetch('/api/auth/methods', { credentials: 'same-origin' })
+      .then(async (res) => {
+        if (res.ok) setMethods(await res.json());
+      })
+      .catch(() => {});
     window.addEventListener('hashchange', readLogin);
     window.addEventListener('popstate', readLogin);
     // Some embedded browsers update history without firing hashchange.
@@ -133,10 +151,20 @@ export default function AccountPage() {
             }}
           >
             <p>
-              Use your email to create an account or sign in. No password
-              needed.
+              Create an account or sign in. No password needed.
             </p>
-            <label htmlFor="email">Email address</label>
+            {methods.google && (
+              <p>
+                <a className="account-button secondary google-button" href="/api/auth/google">
+                  Continue with Google
+                  {lastUsed === 'google' && <span className="last-used">Last used</span>}
+                </a>
+              </p>
+            )}
+            <label htmlFor="email">
+              Email address
+              {lastUsed === 'email' && <span className="last-used">Last used</span>}
+            </label>
             <input
               id="email"
               type="email"
@@ -161,9 +189,7 @@ export default function AccountPage() {
               Signed in as <strong>{account.email}</strong>.
             </p>
             <p className="notice">
-              {account.uploads_enabled
-                ? `Full preview access: files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.retention_days} days to download. Transfers are free while payments are being prepared.`
-                : `Free account: files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.max_daily_transfers} transfers a day, ${gb(account.limits.max_stored_bytes)} stored, ${account.limits.retention_days} days to download. Your agent can send a file right now.`}
+              {`Files up to ${gb(account.limits.max_file_bytes)}, ${account.limits.max_daily_transfers} transfers a day, ${gb(account.limits.max_stored_bytes)} stored, ${account.limits.retention_days} days to download. Sending is free. Your agent can send a file right now.`}
             </p>
             <section>
               <h2>Your handle</h2>
@@ -181,10 +207,13 @@ export default function AccountPage() {
               </p>
             </section>
             <section>
-              <h2>Credit</h2>
+              <h2>Balance</h2>
               <p>
-                Free transfers need no credit. Paid top-ups for larger files
-                and 30-day links are coming soon.
+                <strong>${(account.balance_cents / 100).toFixed(2)}</strong> USD.
+                Your agent spends it with <code>--pay</code> on files priced
+                by their sender, and earns it when someone pays for yours,
+                minus a 5% fee. Card top-ups are not available yet; ask the
+                operator for a grant.
               </p>
             </section>
             <details>

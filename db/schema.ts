@@ -29,6 +29,9 @@ export const transfers = sqliteTable(
     receivedAt: integer('received_at'),
     receivedBy: text('received_by'),
     inReplyTo: text('in_reply_to'),
+    priceCents: integer('price_cents').notNull().default(0),
+    paidAt: integer('paid_at'),
+    paidBy: text('paid_by'),
   },
   (t) => [
     index('idx_transfers_recipient').on(t.recipient, t.completedAt),
@@ -68,6 +71,8 @@ export const accounts = sqliteTable('accounts', {
   deletedAt: integer('deleted_at'),
   uploadsEnabled: integer('uploads_enabled').notNull().default(0),
   handle: text('handle').unique(),
+  balanceCents: integer('balance_cents').notNull().default(0),
+  lastLoginMethod: text('last_login_method'),
 });
 export const loginLinks = sqliteTable(
   'login_links',
@@ -111,10 +116,6 @@ export const apiTokens = sqliteTable(
   (t) => [index('idx_tokens_account').on(t.accountId)],
 );
 
-export const waitlist = sqliteTable('waitlist', {
-  email: text('email').primaryKey(),
-  createdAt: integer('created_at').notNull(),
-});
 
 export const webhooks = sqliteTable('webhooks', {
   accountId: text('account_id')
@@ -142,3 +143,23 @@ export const events = sqliteTable(
     index('idx_events_pending').on(t.nextAttemptAt),
   ],
 );
+export const ledger = sqliteTable(
+  'ledger',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    deltaCents: integer('delta_cents').notNull(),
+    balanceAfter: integer('balance_after').notNull(),
+    kind: text('kind').notNull(),
+    transferId: text('transfer_id'),
+    note: text('note'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('idx_ledger_account_created').on(t.accountId, t.createdAt)],
+);
+
+// Retained from the waitlist era; no longer written. Drop in a later migration once exported.
+export const waitlist = sqliteTable('waitlist', {
+  email: text('email').primaryKey(),
+  createdAt: integer('created_at').notNull(),
+});
