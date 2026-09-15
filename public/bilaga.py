@@ -24,6 +24,7 @@ actions.add_argument('--status', metavar='TRANSFER_ID')
 actions.add_argument('--delete', metavar='TRANSFER_ID')
 actions.add_argument('--sent', metavar='TRANSFER_ID')
 actions.add_argument('--receipt', metavar='PUBLIC_ID', help='Fetch and verify the signed receipt for a share link')
+actions.add_argument('--receipt-hash', type=Path, metavar='FILE', help='Find and verify the receipts for a file you hold, by its content hash; no token needed')
 actions.add_argument('--inbox', action='store_true', help='List transfers addressed to your account email')
 actions.add_argument('--download', metavar='PUBLIC_ID', help='Download a file; with a token, records that your account received it')
 actions.add_argument('--received', metavar='PUBLIC_ID', help='Acknowledge a transfer addressed to you without downloading')
@@ -48,7 +49,7 @@ if url.scheme!='https' and not (url.scheme=='http' and url.hostname in ('localho
 if url.username or url.password or url.path or url.query or url.fragment:
     parser.error('--base must be an origin without credentials, path, query, or fragment.')
 token=os.environ.get('BILAGA_TOKEN','').strip()
-if not token and not (args.receipt or args.verify_event):
+if not token and not (args.receipt or args.verify_event or args.receipt_hash):
     parser.error('Set BILAGA_TOKEN in your environment; do not put tokens in download links.')
 opener=build_opener(NoRedirect)
 
@@ -139,6 +140,18 @@ try:
         result=verify_receipt(args.receipt,args.verify)
         print(json.dumps(result,indent=2))
         sys.exit(0 if result['verified'] else 2)
+    if args.receipt_hash:
+        config=public_get('config')
+        digest=content_hash(args.receipt_hash,config['part_size_bytes'])
+        found=public_get('receipts?hash='+digest)
+        results=[]
+        for signed in found['receipts']:
+            checks,receipt=verify_signed(signed,'receipt')
+            checks['hash_matches']=receipt.get('content_hash')==digest
+            checks['file_size_matches']=receipt.get('size_bytes')==args.receipt_hash.stat().st_size
+            results.append({'verified':all(checks.values()),'checks':checks,'receipt':receipt})
+        print(json.dumps({'content_hash':digest,'receipts':results},indent=2))
+        sys.exit(0 if results and all(r['verified'] for r in results) else 2)
     if args.verify_event:
         signed=json.load(sys.stdin)
         checks,event=verify_signed(signed,'event')

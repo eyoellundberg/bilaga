@@ -52,7 +52,7 @@ export default function Home() {
           <h2>
             Sending is free.
             <br />
-            Selling is 5%.
+            Receipts are forever.
           </h2>
         </div>
         <div className="price launch-price">
@@ -64,11 +64,11 @@ export default function Home() {
           </p>
         </div>
         <p className="pricing-note">
-          Put a price on a file and the recipient’s agent pays from its
-          balance; Bilaga keeps 5% and signs the settlement into the receipt.
+          Every transfer gets a signed receipt that stays verifiable after the
+          file is gone, and anyone holding the file can look it up by hash.
           <br />
-          Storage will be billed at $0.10 per GB once card top-ups exist. Until
-          then storage is free and balances are granted by the operator.
+          Storage will be billed at $0.10 per GB, $0.25 minimum, once card
+          top-ups exist. Until then it is free.
         </p>
       </section>
       <footer>

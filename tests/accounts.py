@@ -109,8 +109,13 @@ rows=sql(f"SELECT purged_at,filename,sender FROM transfers WHERE id='{t['id']}'"
 assert rows[0]['purged_at'] and rows[0]['filename']=='Deleted file' and rows[0]['sender'] is None
 sql(f"UPDATE accounts SET deleted_at=1 WHERE id='{owner}'")
 request('/cdn-cgi/handler/scheduled',auth=False)
-assert not sql(f"SELECT id FROM transfers WHERE owner='{owner}'")
-assert not sql(f"SELECT id FROM accounts WHERE id='{owner}'")
+# The redacted transfer row and the email-less account tombstone stay, so the receipt keeps resolving.
+assert sql(f"SELECT filename FROM transfers WHERE owner='{owner}'")[0]['filename']=='Deleted file'
+assert sql(f"SELECT email,handle FROM accounts WHERE id='{owner}'")[0]['email'] is None
+config,_=request('/api/config',auth=False)
+if config.get('receipts')=='signed_ed25519':
+    r,_=request('/api/receipts/'+ready['share_url'].rsplit('/',1)[1],auth=False)
+    assert r['receipt']['status']=='deleted' and r['receipt']['filename']=='Deleted file' and r['receipt']['sender_account']
 call('auth/logout','POST',cookie=b)
 call('account',cookie=b,expect=401)
 sql("DELETE FROM login_links WHERE email LIKE '%@example.invalid'")

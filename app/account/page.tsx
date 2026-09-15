@@ -9,6 +9,8 @@ type Account = {
   balance_cents: number;
   last_login_method: string | null;
   inbox_count: number;
+  download_requests_total: number;
+  receipt_requests_total: number;
   webhook_url: string | null;
   limits: {
     max_file_bytes: number;
@@ -200,7 +202,10 @@ export default function AccountPage() {
                 {account.inbox_count
                   ? `, which holds ${account.inbox_count} right now`
                   : ''}
-                . Your agent reads it with <code>--inbox</code>.
+                . Your agent reads it with <code>--inbox</code>. Across your
+                transfers, downloads have been requested{' '}
+                {account.download_requests_total} times and receipts{' '}
+                {account.receipt_requests_total} times.
                 {account.webhook_url
                   ? ` Events are posted to ${account.webhook_url}.`
                   : ' No webhook is registered; your agent can add one with --webhook.'}
@@ -210,10 +215,8 @@ export default function AccountPage() {
               <h2>Balance</h2>
               <p>
                 <strong>${(account.balance_cents / 100).toFixed(2)}</strong> USD.
-                Your agent spends it with <code>--pay</code> on files priced
-                by their sender, and earns it when someone pays for yours,
-                minus a 5% fee. Card top-ups are not available yet; ask the
-                operator for a grant.
+                Sending is free; balances are an experimental feature for
+                priced transfers and are granted by the operator.
               </p>
             </section>
             <details>

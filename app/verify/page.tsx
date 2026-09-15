@@ -7,6 +7,7 @@ const receiptFields: [string, string][] = [
   ['version', 'Integer. Currently 1.'],
   ['issuer', 'Always "bilaga.link".'],
   ['transfer', 'Public transfer id: 32 lowercase hex characters.'],
+  ['status', '"available", "expired", or "deleted". Deleted receipts have filename, sender, and addressing redacted; the hash and identities remain.'],
   ['filename', 'The stored filename after sanitisation.'],
   ['size_bytes', 'Integer byte length of the stored file.'],
   ['part_size_bytes', 'Chunk size used for the content hash. Currently 8388608.'],
@@ -26,6 +27,7 @@ const receiptFields: [string, string][] = [
   ['expires_at', 'ISO 8601 time the download link stops working.'],
   ['sent_reported_at', 'When the uploading agent reported delivery, or null.'],
   ['download_requests', 'Integer count of download requests at issue time.'],
+  ['receipt_requests', 'Integer count of receipt fetches and hash lookups at issue time, including this one.'],
   ['last_download_requested_at', 'ISO 8601 time or null.'],
   ['issued_at', 'ISO 8601 time this receipt was signed. Receipts are issued on request, so two receipts for one transfer differ here.'],
 ];
@@ -110,6 +112,11 @@ export default function Verify() {
           <code>bilaga.py --verify-event &lt; body.json</code>. In a browser or
           Node, <code>{"crypto.subtle.verify({name:'Ed25519'}, key, sig, msg)"}</code>{' '}
           with the key imported as raw bytes is enough.
+        </p>
+        <p>
+          Receipts are retained indefinitely and can be found without a link:{' '}
+          <code>GET /api/receipts?hash=CONTENT_HASH</code> returns every
+          signed receipt whose stored bytes have that hash.
         </p>
         <h2>5. Content hash</h2>
         <p>

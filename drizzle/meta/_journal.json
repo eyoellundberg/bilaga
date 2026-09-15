@@ -50,6 +50,13 @@
       "when": 1789460000441,
       "tag": "0006_money",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789462374869,
+      "tag": "0007_receipts_kept",
+      "breakpoints": true
     }
   ]
 }

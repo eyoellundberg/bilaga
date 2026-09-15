@@ -52,6 +52,7 @@ type Transfer = {
   price_cents: number;
   paid_at: number | null;
   paid_by: string | null;
+  receipt_requests: number;
 };
 type AccountIdentity = { id: string; email: string | null; handle: string | null };
 const EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i;
@@ -64,7 +65,10 @@ async function accountIdentity(id: string | null): Promise<AccountIdentity | nul
       .first<AccountIdentity>()) || null
   );
 }
-export const handleOf = async (id: string | null) => (await accountIdentity(id))?.handle ?? null;
+export const handleOf = async (id: string | null) =>
+  !id || id.length === 64
+    ? null
+    : ((await db().prepare('SELECT handle FROM accounts WHERE id=?').bind(id).first<{ handle: string | null }>())?.handle ?? null);
 type Part = {
   number: number;
   etag: string;
@@ -202,6 +206,7 @@ function privateData(t: Transfer, origin: string) {
     completed_at: iso(t.completed_at),
     sent_at: iso(t.sent_at),
     download_requests: t.download_requests,
+    receipt_requests: t.receipt_requests,
     last_download_requested_at: iso(t.last_download_at),
     download_note:
       'Requests indicate a download was started, not completed or read.',
@@ -240,6 +245,7 @@ function eventData(t: Transfer, origin: string) {
     price_cents: t.price_cents,
     paid_at: iso(t.paid_at),
     download_requests: t.download_requests,
+    receipt_requests: t.receipt_requests,
   };
 }
 // What a recipient sees: everything public plus the sender's stable handle.
@@ -343,18 +349,14 @@ export async function publicTransfer(id: string) {
   if (!t || t.state !== 'complete' || t.expires_at <= Date.now()) return null;
   return { ...publicData(t), public_id: t.public_id, content_hash: t.content_hash };
 }
-// Receipts stay verifiable after expiry. Deleted transfers are redacted and get none.
-async function receipt(id: string) {
-  const t = await db()
-    .prepare('SELECT * FROM transfers WHERE public_id=?')
-    .bind(id)
-    .first<Transfer>();
-  if (!t || t.state !== 'complete' || !t.content_hash)
-    return fail(404, 'not_found', 'No receipt is available for this transfer.');
-  const signed = await signReceipt({
+// Receipts are kept indefinitely. After deletion the filename, sender label
+// and addressing are already redacted; the hash, sizes, handles and times remain.
+async function signedReceiptFor(t: Transfer) {
+  return signReceipt({
     version: RECEIPT_VERSION,
     issuer: 'bilaga.link',
     transfer: t.public_id,
+    status: t.state === 'deleted' ? 'deleted' : t.expires_at <= Date.now() ? 'expired' : 'available',
     filename: t.filename,
     size_bytes: t.size,
     part_size_bytes: PART_BYTES,
@@ -375,11 +377,41 @@ async function receipt(id: string) {
     sent_reported_at: iso(t.sent_at),
     download_requests: t.download_requests,
     last_download_requested_at: iso(t.last_download_at),
+    receipt_requests: t.receipt_requests,
     issued_at: new Date().toISOString(),
   });
+}
+const receiptable = (t: Transfer | null): t is Transfer =>
+  !!t && !!t.content_hash && (t.state === 'complete' || t.state === 'deleted');
+async function receipt(id: string) {
+  const t = await db()
+    .prepare('UPDATE transfers SET receipt_requests=receipt_requests+1 WHERE public_id=? AND content_hash IS NOT NULL RETURNING *')
+    .bind(id)
+    .first<Transfer>();
+  if (!receiptable(t))
+    return fail(404, 'not_found', 'No receipt is available for this transfer.');
+  const signed = await signedReceiptFor(t);
   if (!signed)
     return fail(503, 'receipts_unavailable', 'Receipt signing is not configured.');
   return json(signed);
+}
+// Anyone holding a file can ask whether Bilaga ever recorded those bytes.
+async function receiptsByHash(hash: string) {
+  const rows = (
+    await db()
+      .prepare("UPDATE transfers SET receipt_requests=receipt_requests+1 WHERE content_hash=? AND state IN ('complete','deleted') RETURNING *")
+      .bind(hash)
+      .all<Transfer>()
+  ).results
+    .sort((a, b) => (b.completed_at || 0) - (a.completed_at || 0))
+    .slice(0, 10);
+  const receipts = [];
+  for (const t of rows) {
+    const signed = await signedReceiptFor(t);
+    if (!signed) return fail(503, 'receipts_unavailable', 'Receipt signing is not configured.');
+    receipts.push(signed);
+  }
+  return json({ content_hash: hash, receipts });
 }
 async function download(req: Request, id: string) {
   const t = await db()
@@ -537,6 +569,13 @@ export async function handleApi(req: Request) {
         retired_key_ids: [],
         spec_url: `${u.origin}/verify`,
       });
+    }
+    if (p.length === 1 && p[0] === 'receipts' && method === 'GET') {
+      const hash = u.searchParams.get('hash') || '';
+      if (!/^[a-f0-9]{64}$/.test(hash))
+        return fail(400, 'invalid_hash', 'Pass ?hash= as the 64-hex bilaga-chunked-sha256-8mib content hash.');
+      await rateLimit(`receipt-lookup:${await sha256(new TextEncoder().encode(req.headers.get('CF-Connecting-IP') || 'local'))}`, 60);
+      return await receiptsByHash(hash);
     }
     if (
       p.length === 2 &&

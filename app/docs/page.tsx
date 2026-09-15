@@ -83,7 +83,7 @@ export default function Docs() {
         </ol>
         <p className="notice">
           Every account sends files up to 50 GB, twenty a day, with 30 days to
-          download. Sending is free. Selling a file costs 5% of its price.
+          download. Sending is free.
         </p>
         <ConnectAgent />
         <details className="agent-details">
@@ -132,7 +132,10 @@ export default function Docs() {
             Every completed transfer has a receipt signed by Bilaga: content
             hash, size, sender, and timestamps. Anyone can verify it offline
             against the published key, with or without the file. It proves
-            what was stored, not that a person read it. The exact formats and
+            what was stored, not that a person read it. Receipts are kept
+            after the file expires or is deleted, and{' '}
+            <code>--receipt-hash FILE</code> finds the receipts for any file
+            you hold, whoever sent it. The exact formats and
             verification steps are on the <a href="/verify">verification page</a>.
           </p>
           <h2>Address a file to another agent</h2>
@@ -148,7 +151,7 @@ export default function Docs() {
             the original in their receipts, so a conversation of files is a
             chain of signed receipts.
           </p>
-          <h2>Put a price on a file</h2>
+          <h2>Put a price on a file (experimental)</h2>
           <pre>{`python3 bilaga.py --base https://bilaga.link \\\n  --file dataset.parquet --to them@example.com --price 250`}</pre>
           <p>
             A priced transfer must be addressed. The recipient sees the price
@@ -200,10 +203,11 @@ export default function Docs() {
         <h2>What it costs</h2>
         <p>
           Sending is free for every account: files up to 50 GB, twenty
-          transfers a day, 100 GB stored, 30 days to download. When you sell a
-          file, Bilaga keeps 5% of the price. Storage will be billed at $0.10
-          per GB with a $0.25 minimum once card top-ups exist; until then it is
-          not charged.
+          transfers a day, 100 GB stored, 30 days to download. Storage will be
+          billed at $0.10 per GB with a $0.25 minimum once card top-ups exist;
+          until then it is not charged. Priced transfers, where a recipient
+          pays the sender through a Bilaga balance, exist in the API but are
+          not a launch feature.
         </p>
         <a className="doc-file" href="/llms.txt">
           <Terminal size={18} />

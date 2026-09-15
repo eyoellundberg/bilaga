@@ -68,6 +68,20 @@ def main():
     sent,_=request(path+'/sent','POST');assert sent['sent_at']
     request(path,'DELETE');request(path,'DELETE')
     request(download,auth=False,expect=404)
+    # Receipts outlive the file: still served after deletion, redacted, findable by hash, and counted.
+    request('/api/receipts?hash=zz',auth=False,expect=400)
+    if config.get('receipts')=='signed_ed25519':
+        gone,_=request('/api/receipts/'+public_id,auth=False)
+        assert gone['receipt']['status']=='deleted' and gone['receipt']['filename']=='Deleted file' and gone['receipt']['content_hash']==expected
+        by_hash,_=request('/api/receipts?hash='+expected,auth=False)
+        assert [r['receipt']['transfer'] for r in by_hash['receipts']]==[public_id]
+        status,_=request(path);assert status['receipt_requests']>=3
+        Path('.wrangler/hash-probe.bin').write_bytes(payload)
+        probe=subprocess.run(['python3','public/bilaga.py','--base',BASE,'--receipt-hash','.wrangler/hash-probe.bin'],capture_output=True,text=True)
+        os.remove('.wrangler/hash-probe.bin')
+        assert probe.returncode==0 and json.loads(probe.stdout)['receipts'][0]['verified'],probe.stdout[-300:]+probe.stderr[-300:]
+    else:
+        request('/api/receipts?hash='+expected,auth=False,expect=503)
     # Force time forwards for a separate local fixture; test actual expiry and cleanup.
     t,_=request('/api/transfers','POST',{'filename':'expiry.txt','size_bytes':3},expect=201)
     path='/api/transfers/'+t['id'];request(path+'/parts/1','PUT',b'bye');ready,_=request(path+'/complete','POST')

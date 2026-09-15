@@ -32,9 +32,11 @@ export const transfers = sqliteTable(
     priceCents: integer('price_cents').notNull().default(0),
     paidAt: integer('paid_at'),
     paidBy: text('paid_by'),
+    receiptRequests: integer('receipt_requests').notNull().default(0),
   },
   (t) => [
     index('idx_transfers_recipient').on(t.recipient, t.completedAt),
+    index('idx_transfers_content_hash').on(t.contentHash),
     index('idx_transfers_owner_created').on(t.owner, t.createdAt),
     index('idx_transfers_expiry').on(t.expiresAt),
     index('idx_transfers_pending_cleanup').on(t.purgedAt, t.expiresAt),

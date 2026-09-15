@@ -367,6 +367,10 @@ export async function accountRoutes(
       .prepare('SELECT url FROM webhooks WHERE account_id=?')
       .bind(account.id)
       .first<{ url: string }>();
+    const totals = await db()
+      .prepare('SELECT COALESCE(SUM(download_requests),0) AS downloads, COALESCE(SUM(receipt_requests),0) AS receipts FROM transfers WHERE owner=?')
+      .bind(account.id)
+      .first<{ downloads: number; receipts: number }>();
     const inbox = await db()
       .prepare(
         "SELECT count(*) AS n FROM transfers WHERE recipient=? AND state='complete' AND expires_at>?",
@@ -377,6 +381,8 @@ export async function accountRoutes(
       email: account.email,
       handle: account.handle,
       inbox_count: inbox?.n ?? 0,
+      download_requests_total: totals?.downloads ?? 0,
+      receipt_requests_total: totals?.receipts ?? 0,
       webhook_url: hook?.url ?? null,
       balance_cents: account.balance_cents,
       last_login_method: account.last_login_method,
@@ -487,11 +493,8 @@ export async function cleanAccounts() {
   await db().batch([
     db().prepare('DELETE FROM login_links WHERE expires_at<=?').bind(now),
     db().prepare('DELETE FROM sessions WHERE expires_at<=?').bind(now),
-    // Keep tombstones briefly so requests already in flight can observe revocation.
-    db()
-      .prepare(`DELETE FROM transfers WHERE id IN (SELECT t.id FROM transfers t JOIN accounts a ON a.id=t.owner
-      WHERE a.deleted_at<? AND t.purged_at IS NOT NULL LIMIT 100)`)
-      .bind(now - DAY),
+    // Transfer rows are kept as redacted receipt records; an account row with
+    // transfers stays as an email-less tombstone so its handle keeps resolving.
     db()
       .prepare(
         `DELETE FROM accounts WHERE deleted_at<? AND NOT EXISTS(SELECT 1 FROM transfers WHERE owner=accounts.id)`,
