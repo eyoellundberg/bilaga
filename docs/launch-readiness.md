@@ -1,6 +1,6 @@
 # Google sign-in and revised offer deployed (15 September 2026)
 
-- Worker version 98b2f03f deployed with GOOGLE_CLIENT_ID as a var and GOOGLE_CLIENT_SECRET as a secret. /api/auth/methods reports google:true; /api/auth/google redirects to Google with PKCE and the bilaga.link callback; Google accepts the client and redirect URI (no redirect_uri_mismatch). The consent screen currently shows the app name "OnlyPans", so the OAuth client sits in a Google Cloud project whose consent screen needs renaming to Bilaga (or a Bilaga project). Completing a sign-in requires the operator's Google credentials and was not performed by the agent.
+- Worker version ba23a96c deployed with GOOGLE_CLIENT_ID (a dedicated Bilaga Google Cloud project; the first client belonged to another project's consent screen) as a var and GOOGLE_CLIENT_SECRET as a secret. The consent screen now reads bilaga.link. /api/auth/methods reports google:true; /api/auth/google redirects to Google with PKCE and the bilaga.link callback; Google accepts the client and redirect URI (no redirect_uri_mismatch). Completing a sign-in requires the operator's Google credentials and was not performed by the agent.
 - This deploy also publishes the revised offer below (Plus/Pro packs, 5-transfer allowance).
 
 
