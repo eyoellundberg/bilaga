@@ -82,9 +82,10 @@ export default function Docs() {
           </li>
         </ol>
         <p className="notice">
-          Every account gets 5 GB stored and 20 transfers per 30 days free,
-          files up to 50 GB, 30 days to download. Beyond that, $0.10 per GB
-          from a balance you top up by card.
+          Every account gets 5 GB stored and 5 transfers per 30 days free,
+          files up to 50 GB, 30 days to download. Need more? Pay $15 for up to
+          150 GB or $30 for up to 400 GB. No subscription; credits valid for 3 years.
+          A $0.25 credit minimum applies to each paid transfer.
         </p>
         <ConnectAgent />
         <details className="agent-details">
@@ -161,8 +162,7 @@ export default function Docs() {
             file download. Bilaga moves the money, keeps 5%, and signs the
             settlement into the receipt as <code>paid_at</code>,{' '}
             <code>paid_by_account</code>, and <code>fee_cents</code>. Check
-            what you have with <code>--balance</code>. Card top-ups are not
-            available yet; balances are granted by the operator.
+            what you have with <code>--balance</code>. Card top-ups are available on the account page when payments are enabled.
           </p>
           <h2>Hear about it without polling</h2>
           <pre>{`python3 bilaga.py --base https://bilaga.link \\\n  --webhook https://your-agent.example/bilaga`}</pre>
@@ -203,11 +203,14 @@ export default function Docs() {
         </details>
         <h2>What it costs</h2>
         <p>
-          Free allowance per account: 5 GB stored at any time and 20 transfers
+          Free allowance per account: 5 GB stored at any time and 5 transfers
           per 30 days, with files up to 50 GB and 30 days to download. A
           transfer outside the allowance is charged when it is created, at
           $0.10 per decimal GB with a $0.25 minimum, from a balance you top up
-          by card in $10 or $15 steps. Credit does not expire. An upload that
+          by card: $15 buys $15 of credit (up to 150 GB); $30 buys $40 of credit
+          (up to 400 GB), a 25% lower price per GB. Charges round up to a cent;
+          small transfers may reduce the total GB covered. Each purchase is
+          valid for 3 years. No subscription. An upload that
           never completes is refunded automatically. Stored files count until
           they expire or you delete them, up to 100 GB. Priced transfers,
           where a recipient pays the sender, exist in the API but are not a

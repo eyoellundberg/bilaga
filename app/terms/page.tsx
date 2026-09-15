@@ -32,7 +32,7 @@ const sections = [
   ],
   [
     'Planned pricing',
-    'When a recipient pays for a priced file, Bilaga transfers the price from the payer balance to the seller balance and retains a 5% fee; the settlement is recorded in the signed receipt. Storage is not charged; the proposed storage price is USD 0.10 per decimal GB with a USD 0.25 minimum. Card top-ups, withdrawals, refunds, taxes, and the effect of account deletion on balances must be settled and disclosed before money can be purchased or withdrawn.',
+    'When a recipient pays for a priced file, Bilaga transfers the price from the payer balance to the seller balance and retains a 5% fee; the settlement is recorded in the signed receipt. Storage is not charged separately. Paid uploads consume USD 0.10 of transfer credit per decimal GB, rounded up to a cent, with a USD 0.25 minimum per transfer. A one-time USD 15 purchase adds USD 15 credit (up to 150 GB); USD 30 adds USD 40 credit (up to 400 GB). Small transfers may reduce the total GB covered. Purchased credits are valid for three years from purchase; file downloads remain available for 30 days. Withdrawals, refunds, taxes, and the effect of account deletion on balances must be settled and disclosed before live payments launch.',
   ],
   [
     'Responsibility and applicable rights',

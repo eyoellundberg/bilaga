@@ -6,6 +6,7 @@ export { json } from './http';
 import { sha256 } from './hash';
 import { env } from 'cloudflare:workers';
 import {
+  topUpPack,
   MAX_BYTES,
   PART_BYTES,
   DAY,
@@ -551,7 +552,7 @@ export async function handleApi(req: Request) {
       const raw = new TextDecoder().decode(await boundedBody(req, 65_536));
       if (!(await verifyStripeSignature(req.headers.get('Stripe-Signature'), raw)))
         return fail(400, 'bad_signature', 'Invalid Stripe signature.');
-      let event: { type?: string; data?: { object?: { id?: string; payment_status?: string; amount_total?: number; currency?: string; metadata?: { account_id?: string } } } };
+      let event: { type?: string; data?: { object?: { id?: string; payment_status?: string; amount_total?: number; currency?: string; metadata?: { account_id?: string; offer?: string } } } };
       try {
         event = JSON.parse(raw);
       } catch {
@@ -563,17 +564,22 @@ export async function handleApi(req: Request) {
       const amount = session.amount_total ?? 0;
       if (session.payment_status !== 'paid' || session.currency !== 'usd' || !/^[a-f0-9]{32}$/.test(accountId) || !Number.isInteger(amount) || amount <= 0)
         return json({ received: true, ignored: 'unpaid_or_malformed' });
+      const pack = session.metadata?.offer === 'packs_2026_09' ? topUpPack(amount) : undefined;
+      if (session.metadata?.offer === 'packs_2026_09' && !pack)
+        return fail(400, 'invalid_pack', 'Unknown top-up pack.');
+      // Legacy checkouts retain their original dollar-for-dollar credit.
+      const credit = pack?.credit_cents ?? amount;
       // Idempotent on the session id: replayed webhooks credit nothing.
       const ledgerId = `stripe_${session.id}`.slice(0, 200);
       const now = Date.now();
       const results = await db().batch([
         db()
           .prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM ledger WHERE id=?)`)
-          .bind(amount, accountId, ledgerId),
+          .bind(credit, accountId, ledgerId),
         db()
           .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
             SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'purchase',NULL,?,? WHERE NOT EXISTS(SELECT 1 FROM ledger WHERE id=?) AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)`)
-          .bind(ledgerId, accountId, amount, accountId, 'Card top-up', now, ledgerId, accountId),
+          .bind(ledgerId, accountId, credit, accountId, `Card top-up: paid $${amount / 100}, received $${credit / 100} credit; valid for 3 years`, now, ledgerId, accountId),
       ]);
       return json({ received: true, credited: results[1].meta.changes > 0 });
     }
@@ -689,7 +695,7 @@ export async function handleApi(req: Request) {
         balance_cents: balance?.balance_cents ?? 0,
         currency: 'USD',
         top_ups: stripeConfigured()
-          ? 'Add credit at /account with a card ($10 or $15).'
+          ? 'Add credit at /account: $15 for $15 credit (up to 150 GB), or $30 for $40 credit (up to 400 GB).'
           : 'Card top-ups are not configured; credit is granted by the operator.',
         ledger: rows.map((r) => ({ ...r, created_at: iso(r.created_at) })),
       });

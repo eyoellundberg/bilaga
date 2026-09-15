@@ -226,9 +226,9 @@ export default function AccountPage() {
             <section>
               <h2>Balance</h2>
               <p>
-                <strong>${(account.balance_cents / 100).toFixed(2)}</strong> USD.
+                <strong>${(account.balance_cents / 100).toFixed(2)}</strong> in credit.
                 Transfers outside your free allowance are paid from here at
-                $0.10 per GB. Credit does not expire.
+                $0.10 of credit per GB ($0.25 minimum per transfer). Purchased credits are valid for 3 years. Pay $15 for up to 150 GB, or $30 for up to 400 GB — 25% less per GB. Small transfers and cent rounding may reduce the total GB covered.
               </p>
               {account.top_ups === 'stripe_checkout' ? (
                 <p>
@@ -245,7 +245,7 @@ export default function AccountPage() {
                         })
                       }
                     >
-                      {`Add $${cents / 100}`}
+                      {`$${cents / 100} · up to ${cents === 3000 ? 400 : 150} GB`}
                     </button>
                   ))}
                 </p>

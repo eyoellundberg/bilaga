@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { fail } from './http';
+import { topUpPack } from './rules';
 
 // Stripe Checkout without the SDK: two REST calls and one HMAC. The secret key
 // creates sessions; the webhook secret authenticates Stripe's callback.
@@ -9,6 +10,8 @@ export const stripeConfigured = () =>
   !!(settings().STRIPE_SECRET_KEY && settings().STRIPE_WEBHOOK_SECRET);
 
 export async function createCheckout(accountId: string, amountCents: number, origin: string) {
+  const pack = topUpPack(amountCents);
+  if (!pack) return fail(400, 'invalid_amount', 'Choose $15 or $30.');
   const key = settings().STRIPE_SECRET_KEY;
   if (!key || !settings().STRIPE_WEBHOOK_SECRET)
     return fail(503, 'payments_unavailable', 'Card top-ups are not configured.');
@@ -16,10 +19,12 @@ export async function createCheckout(accountId: string, amountCents: number, ori
     mode: 'payment',
     'line_items[0][price_data][currency]': 'usd',
     'line_items[0][price_data][unit_amount]': String(amountCents),
-    'line_items[0][price_data][product_data][name]': `Bilaga credit ($${(amountCents / 100).toFixed(2)})`,
+    'line_items[0][price_data][product_data][name]': `Bilaga — up to ${pack.up_to_gb} GB of transfers`,
     'line_items[0][quantity]': '1',
     'metadata[account_id]': accountId,
     'metadata[amount_cents]': String(amountCents),
+    'metadata[offer]': 'packs_2026_09',
+    'line_items[0][price_data][product_data][description]': 'One-time payment. Credits valid for 3 years. $0.25 credit minimum per paid transfer; 30-day download availability.',
     success_url: `${origin}/account#topup=ok`,
     cancel_url: `${origin}/account#topup=cancelled`,
   });

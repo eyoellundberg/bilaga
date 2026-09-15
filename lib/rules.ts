@@ -9,8 +9,13 @@ export const MONTH = 30 * DAY;
 // 30 days. Beyond it, each transfer is charged from the account balance at
 // the storage price. The owner test token is never charged.
 export const FREE_STORED_BYTES = 5_000_000_000;
-export const FREE_MONTHLY_TRANSFERS = 20;
-export const TOP_UP_CENTS = [1000, 1500] as const;
+export const FREE_MONTHLY_TRANSFERS = 5;
+export const TOP_UP_CENTS = [1500, 3000] as const;
+export const TOP_UP_PACKS = [
+  { amount_cents: 1500, credit_cents: 1500, up_to_gb: 150 },
+  { amount_cents: 3000, credit_cents: 4000, up_to_gb: 400 },
+] as const;
+export const topUpPack = (amount: number) => TOP_UP_PACKS.find((pack) => pack.amount_cents === amount);
 export const LIMITS = {
   max_file_bytes: MAX_BYTES,
   retention_ms: RETENTION,
@@ -31,6 +36,8 @@ export function describeLimits(l: Limits = LIMITS) {
     price_cents_per_gb: 10,
     minimum_charge_cents: 25,
     top_up_cents: [...TOP_UP_CENTS],
+    top_up_packs: TOP_UP_PACKS,
+    credit_validity_years: 3,
   };
 }
 // Priced transfers: the sender names a price in cents; Bilaga keeps a fee when

@@ -1,3 +1,14 @@
+# Revised offer — local changes, not deployed (15 September 2026)
+
+- Website, account checkout, API docs, README and bilaga.md now describe $15 → $15 credit / up to 150 GB and $30 → $40 credit / up to 400 GB. Larger pack costs 25% less per GB.
+- Free allowance reduced from 20 to 5 transfers per rolling 30 days (FREE_MONTHLY_TRANSFERS in lib/rules.ts); 5 GB stored unchanged. Copy updated on home, docs, README, llms.txt and bilaga.md. Applies to existing accounts at their next transfer.
+- No subscription; three-year purchased-credit validity policy. Same 30-day file availability and free allowance. Existing $0.25 minimum and cent rounding remain and are disclosed.
+- Checkout offer metadata and webhook credit amounts updated; legacy checkout sessions retain their original credit amount.
+- Before activating live payments: implement per-purchase expiry tracking and enforcement, oldest-first spending, expiry display and reminders; retain existing credit terms for previous purchases. Aggregate balance currently does not enforce expiry.
+- Local validation passed: lint, TypeScript, production build, five client tests, and pack arithmetic checks (credit amounts, 150/400 GB capacity at 50 GB per transfer, minimum charge, and 25% discount).
+- Repeat sandbox checkout and signed-webhook replay verification for both packs, then deploy. No deployment or live Stripe changes performed as part of this copy update.
+- Promotional credit must be separated from withdrawable proceeds before experimental priced transfers support payouts.
+
 # Launch readiness — 15 September 2026
 
 This file separates current implementation from verification and publication. The existing direct Cloudflare Worker at bilaga.link is the deployment target. The account/large-file/policy source was deployed on 13 September 2026. Deployment evidence is below; this is not public-launch certification.
@@ -71,7 +82,7 @@ The account page handles login fragments at mount and during existing-tab naviga
 - Complete full-size local testing, then separately validate real Cloudflare/R2 reliability, representative connections, interruption/network failure and lost response recovery, throughput and Worker resource limits. Local emulator success is not production load certification.
 - Confirm an R2 lifecycle rule that aborts orphan multipart allocations; test cleanup failures/backlogs and operational alerting. Scheduled cleanup is bounded and cannot promise immediate physical deletion. Confirm storage budgets, edge/global abuse limits, monitoring and incident response.
 - Decide the public content/scanning/quarantine policy; current preview files are opaque and unscanned. Define a process for takedowns and malicious files.
-- Before paid uploads: implement idempotent Stripe payment confirmation, durable dollar ledger with per-purchase 24-month expiry, atomic credit reservation/release, completed-transfer charging, refunds/withdrawal/unused-credit/account-deletion handling, tax disclosures, and support. Free-tier limits and signup throttles replace the manual upload gate; paid access must still check balance before raising limits.
+- Before paid uploads: implement idempotent Stripe payment confirmation, durable dollar ledger with per-purchase three-year expiry, atomic credit reservation/release, completed-transfer charging, refunds/withdrawal/unused-credit/account-deletion handling, tax disclosures, and support. Free-tier limits and signup throttles replace the manual upload gate; paid access must still check balance before raising limits.
 
 ## Sources for policy / provider review
 

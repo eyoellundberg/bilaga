@@ -50,22 +50,25 @@ export default function Home() {
         <div>
           <p className="eyebrow">PRICING · USD</p>
           <h2>
-            Sending is free.
+            Start free. Pay as you go.
             <br />
             Receipts are forever.
           </h2>
         </div>
         <div className="price launch-price">
-          <span>$0.10</span>
+          <span>$15 / $30</span>
           <p>
-            per GB beyond the free allowance
+            Up to 150 GB / 400 GB of paid transfers · no subscription
             <br />
-            <strong>5 GB stored and 20 transfers per month free · 50 GB per file · 30 days to download</strong>
+            <strong>5 GB stored and 5 transfers per 30 days free · 50 GB per file · 30 days to download</strong>
           </p>
         </div>
         <p className="pricing-note">
-          Add $10 or $15 of credit by card; it never expires. A 1 GB file
-          costs $0.25, 10 GB costs $1, 50 GB costs $5.
+          Pay $15 for $15 of transfer credit, or $30 for $40 of credit —
+          25% less per GB with the larger pack. Credits are valid for 3 years
+          from purchase. Paid transfers use $0.10 of credit per GB, with a
+          $0.25 minimum per transfer and rounding up to the nearest cent;
+          small transfers may reduce the total GB your pack covers.
           <br />
           Every transfer gets a signed receipt that stays verifiable after the
           file is gone, and anyone holding the file can look it up by hash.
