@@ -62,3 +62,7 @@ npm run lint covers all application code; unused starter components and the Open
 ## Waitlist
 
 The homepage collects launch-interest emails in D1 table waitlist (normalized email primary key and signup timestamp). POST /api/waitlist is same-origin, body-bounded, rate-limited and duplicate-safe, with a honeypot. It sends no automatic email and creates no account. The original homepage/upload UI is at /preview. Accounts are self-serve on the free tier, so the waitlist is for launch news, not access. The preview URL is discoverable, not an access-control boundary. Launch notifications require a separate sending action.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
