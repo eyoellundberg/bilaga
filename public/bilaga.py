@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Bilaga client. Python 3.10+, standard library only. Set BILAGA_TOKEN to send; receipts verify without a token."""
+# SPDX-License-Identifier: MIT
 import argparse
 import hashlib
 import json
