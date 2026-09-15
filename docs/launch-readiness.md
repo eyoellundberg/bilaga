@@ -2,6 +2,12 @@
 
 This file separates current implementation from verification and publication. The existing direct Cloudflare Worker at bilaga.link is the deployment target. The account/large-file/policy source was deployed on 13 September 2026. Deployment evidence is below; this is not public-launch certification.
 
+## Receipts kept forever — 15 September 2026 (evening)
+
+- Migration 0007 (receipt_requests, content-hash index) applied locally and remotely. Worker version 024a3bfa-883d-400f-b999-92625b53d2c2 deployed after all suites passed: transfer suite 43 (receipt after deletion with status deleted and redacted filename, lookup by hash, counter, client `--receipt-hash` verification), accounts 30 (redacted transfer row and email-less account tombstone survive scheduled erasure; the deleted receipt still resolves the sender handle), scheduled, security, network 59.
+- Production: home page leads with free sending and permanent receipts, no selling copy. The morning's addressed test transfer resolves by id with status available and by content hash, the counter increments, and the shipped client verifies the hash lookup against the original file.
+- Pricing decision: Stripe Connect payouts are not being built; priced transfers stay in the API marked experimental. The only Stripe work still planned is plain Checkout for the sender's own storage top-ups.
+
 ## Open to everyone, Google sign-in, priced transfers, verification spec — 15 September 2026 (afternoon)
 
 - Migration 0006 (balances, last login method, prices, ledger) applied locally and remotely. Worker version b1d28d7d-ca41-48bc-9d20-fa7576cf7ef4 deployed to https://bilaga.link after all suites passed on the deployed build: client tests 5, transfer suite 39, accounts 30 (now includes the Google start redirect, browser-bound state, mismatched-callback rejection, and the last-used cookie), scheduled, security, network 59 (adds priced transfers: addressing required, owner token refused, 402 before payment, insufficient balance, idempotent repeat payment, other-account conflict, settlement arithmetic with the 5% fee, ledger rows, receipt settlement fields, transfer.paid events).
