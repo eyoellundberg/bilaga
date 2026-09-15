@@ -6,7 +6,9 @@ This file separates current implementation from verification and publication. Th
 
 - Migration 0005 (handles, addressing, webhooks, events) applied locally; all suites re-run against the rebuilt Worker: client tests 5, transfer suite 39, accounts 25, scheduled, security, and the new network suite with 44 checks (webhook URL validation, signed test delivery verified with the shipped client, tampered event rejected, addressed transfer hidden from the public page, inbox isolation, received-by recorded from an authenticated download, reply chaining with `transfer.reply` to the original sender, event feed ordering/paging/filtering, failed delivery retried and drained by the scheduled job, account deletion redaction).
 - Lesson recorded: `wrangler dev` did not reload later builds during this session; restart it after every build before trusting a test result.
-- Remote migration, deployment, and the production smoke test are recorded below once done.
+- Remote migration 0005 applied (13 commands). Worker version 97f619bf-3553-4b8c-93ae-60d58ec74f6b deployed to https://bilaga.link after the full local suite passed on the deployed build.
+- Production smoke test: /api/config reports `signals: polling_events_webhooks`, `addressing: email`, signed receipts. All eight pages return 200. Webhook, inbox, and events endpoints refuse the owner test token with 403 account_required as designed. A small text file addressed to the operator's email uploaded and completed through the shipped client; the public download page does not contain the email; the receipt verifies offline and shows `addressed: true` with no recipient account yet. That transfer (public id 2dc80abd…) was left in place so the operator can see it in their inbox after signing in.
+- Not yet exercised in production: a real account registering a webhook against a public https endpoint, and the recipient side (inbox listing, authenticated download, reply). Both passed locally against the same build.
 
 ## Direct Cloudflare deployment — 13 September 2026
 
