@@ -56,11 +56,13 @@ Removed the agent-name field; new tokens receive an automatic label, and agent a
 
 Account simplification deployed as Worker version 2cf344be-7a68-49f2-9c65-ce2f3c28dfa0. Build, lint, and TypeScript passed.
 
-## Free tier, signed receipts, recipient loop — 14 September 2026 (local, not deployed)
+## Free tier, signed receipts, recipient loop — deployed 15 September 2026
 
 New accounts are self-serve on a free tier (1 GB, 5/day, 1 pending, 2 GB stored, 7-day access); uploads_enabled=1 keeps full limits. Signup is throttled per IP (5/day) and per email domain (50/day). Completion stores a chunked content hash; GET /api/receipts/{public_id} returns an Ed25519-signed receipt and GET /api/receipt-key the public key. The Python client verifies receipts and files offline (pure-Python Ed25519, cross-checked against Node's signer). The download page links the receipt and invites recipients to send a file back.
 
-Verified locally: build, lint, TypeScript, client tests, Python verifier against a Node-generated signature. Not yet run: HTTP suites (Wrangler was unavailable in the authoring session). Before deploying: apply migration 0004, set RECEIPT_SIGNING_KEY, run tests/integration.py and tests/accounts.py locally with the same key in .env, and smoke-test a free-tier account on bilaga.link.
+Verified locally before deployment: build, lint, TypeScript, 5 client tests, and the integration (39 checks), account (25 checks), security, and scheduled suites against the local Worker with a local signing key. RECEIPT_SIGNING_KEY uploaded as a Worker secret without printing it; remote migration 0004 applied; Worker version 24ee9359-5422-4794-a886-837a3150a433 deployed to bilaga.link and workers.dev with the 15-minute schedule.
+
+Production smoke test: /api/config reports signed_ed25519 receipts and both tiers; /api/receipt-key serves the key; /, /account, /docs, /preview, /llms.txt and /bilaga.py return 200. A 300,000-byte owner-token upload completed with a content hash, its download was verified against the signed receipt by the shipped client (all five checks true, download_requests 1), the transfer was deleted, and the receipt then returned 404. Not yet tested in production: a brand-new free-tier account end to end, and the signup throttles.
 
 ## Waitlist starter — 13 September 2026
 
