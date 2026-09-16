@@ -1,3 +1,7 @@
+# MCP server — deployed 16 September 2026
+
+`bilaga-mcp` 0.1.0 is published on npm (stdio MCP server, 24 tools; source in `mcp/`). Worker version 9331ebbb-ad5f-462b-bb2f-ffa98efc71da adds the /mcp page, a link from /docs, a sitemap entry, and an llms.txt entry. Live check: /, /docs, /mcp, /llms.txt and /sitemap.xml return 200 and the page shows the npx command. Before publishing, an owner-token round trip through the server over stdio uploaded a 41-byte file, downloaded it from the public link, and deleted it. Package tests (5) cover upload, part retry, resume, error mapping, download and the no-token case. Not yet tested: the account tools (inbox, balance, events, webhooks, requests) with a real account token, and `npx -y bilaga-mcp` from a clean machine.
+
 # Launch-day copy, abuse policy and SEO — deployed 16 September 2026
 
 Worker version 048b038f deployed (commits ca2770a, b94f48c, 5a72879). Live checks after deploy: /, /docs, /terms, /privacy, /verify, /robots.txt, /sitemap.xml and /llms.txt all 200; the home page title is "Bilaga — Where large files get sent" with Open Graph, Twitter, canonical and SoftwareApplication JSON-LD present; /terms shows the "Abuse and takedowns" section; the llms.txt summary line carries the new copy. Lint, TypeScript and build passed locally before deploy. No migration was needed.
