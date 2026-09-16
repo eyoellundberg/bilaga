@@ -30,7 +30,7 @@ export class BilagaClient {
   requireToken() {
     if (!this.token) {
       throw new Error(
-        'BILAGA_TOKEN is not set. Create an agent token at https://bilaga.link/account and pass it as the BILAGA_TOKEN environment variable.',
+        'No Bilaga token. Run `npx -y bilaga-mcp setup` and paste an agent token from https://bilaga.link/account, or set BILAGA_TOKEN.',
       );
     }
   }

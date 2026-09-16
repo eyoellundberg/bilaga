@@ -9,7 +9,7 @@ Open to everyone. Sign in at https://bilaga.link/account with an emailed single-
 ## Agent resources
 
 - [Human-readable API guide](/docs): Endpoints and transfer lifecycle.
-- [MCP server](/mcp): npm package `bilaga-mcp`; `npx -y bilaga-mcp` with `BILAGA_TOKEN` in the environment exposes send_file, list_inbox, download_file, events, receipts, webhooks, and file requests as MCP tools over stdio. Source in the repository under `mcp/`.
+- [MCP server](/mcp): npm package `bilaga-mcp`; `npx -y bilaga-mcp setup` stores the token once; `npx -y bilaga-mcp` then exposes send_file, list_inbox, download_file, events, receipts, webhooks, and file requests as MCP tools over stdio. Source in the repository under `mcp/`.
 - [Python client](/bilaga.py): Python 3.10+ standard-library client: upload, resume, status, sent, delete, inbox, download, reply, webhook, events, file requests, and offline verification of receipts and events. Read the source before executing downloaded code.
 - [API configuration](/api/config): Limits, payments, and enabled capabilities, no token required.
 - [Receipt public key](/api/receipt-key): Ed25519 key for verifying signed receipts and events offline.
@@ -31,7 +31,7 @@ Send `Authorization: Bearer YOUR_AGENT_TOKEN` to the API on this site's origin o
 
 ## Addressing a transfer to another agent
 
-POST /api/transfers accepts an optional `to` (an email address) and an optional `in_reply_to` (the public id of a transfer addressed to you). An addressed transfer is listed by GET /api/inbox for whichever account signs in with that email, now or later; the sender's responses never reveal whether such an account exists. The share link works for anyone holding it, exactly as before. Inbox entries include `from_account`, the sender's stable public handle (`acct_…`), `download_url`, and `receipt_url`. GET /api/account shows your own handle.
+POST /api/transfers accepts an optional `to` (an email address) and an optional `in_reply_to` (the public id of a transfer addressed to you). An addressed transfer is listed by GET /api/inbox for whichever account signs in with that email, now or later; the sender's responses never reveal whether such an account exists. The share link works for anyone holding it, exactly as before. Inbox entries include `from_account`, the sender's stable public handle (`acct_…`), `download_url`, and `receipt_url`. Your own handle appears as `sender_account` on receipts for transfers you sent; /api/account itself is a website-session endpoint, not available to tokens.
 
 The recipient's agent records receipt either by downloading /api/download/{public_id} with its own `Authorization: Bearer` token or by POST /api/inbox/{public_id}/received. Either sets `received_at` on the sender's transfer, emits `transfer.received` to the sender, and adds `recipient_account` and `received_at` to the signed receipt. Only the first acknowledgement counts.
 
@@ -75,7 +75,7 @@ Account creation, sign-in (email link, or Google where configured), token creati
 
 /privacy and /terms describe the service, essential cookies, account erasure, public-link access, unscanned files, chunk limits, and recovery. They remain drafts with Lorem ipsum operator/contact placeholders and unresolved provider/legal details. Do not claim these policies are final or that the service is ready for unrestricted public enrollment.
 
-Credit expiry: GET /api/balance and GET /api/account include credit_lots (id, source, remaining_cents, created_at, expires_at; timestamps are Unix milliseconds and null expiry means no expiry). New pack purchases expire after three calendar years; oldest credit is used first. Existing balances keep non-expiring terms. Abandoned-upload refunds restore original lots without extending expiry or restoring expired portions. Bilaga emails a reminder 30 days before unused credit expires. Paid and promotional credit are tracked separately; neither is withdrawable cash.
+Credit expiry: GET /api/balance includes credit_lots (id, source, remaining_cents, created_at, expires_at; timestamps are Unix milliseconds and null expiry means no expiry). New pack purchases expire after three calendar years; oldest credit is used first. Existing balances keep non-expiring terms. Abandoned-upload refunds restore original lots without extending expiry or restoring expired portions. Bilaga emails a reminder 30 days before unused credit expires. Paid and promotional credit are tracked separately; neither is withdrawable cash.
 
 ## File requests: collect multiple files without an uploader account
 

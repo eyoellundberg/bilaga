@@ -6,10 +6,11 @@ import { z } from 'zod';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { BilagaClient, BilagaError } from './client.js';
+import { loadToken, runSetup, tokenPath } from './setup.js';
 
 export function createServer(client) {
   const server = new McpServer(
-    { name: 'bilaga', version: '0.1.0' },
+    { name: 'bilaga', version: '0.2.0' },
     {
       instructions: [
         'Bilaga sends large files (up to 50 GB) and returns a share link valid for 30 days.',
@@ -88,7 +89,6 @@ export function createServer(client) {
   );
 
   // Account, pricing, events
-  tool('get_account', 'Show this account\'s public handle, limits, and credit lots.', {}, () => client.api('account'));
   tool('get_balance', 'Show the account balance in cents and the last 50 ledger entries.', {}, () => client.api('balance'));
   tool('get_quote', 'Price a transfer of the given size in bytes and whether uploading is allowed right now.', { bytes: z.number().int().positive() }, ({ bytes }) =>
     client.api(`quote?bytes=${bytes}`),
@@ -150,12 +150,13 @@ export function createServer(client) {
 }
 
 async function main() {
+  if (process.argv[2] === 'setup') return runSetup(process.argv[3]);
   const client = new BilagaClient({
     base: process.env.BILAGA_BASE ?? 'https://bilaga.link',
-    token: process.env.BILAGA_TOKEN,
+    token: loadToken(),
   });
   if (!client.token) {
-    console.error('bilaga-mcp: BILAGA_TOKEN is not set; only public tools (get_config, get_receipt) will work.');
+    console.error(`bilaga-mcp: no token. Run \`npx -y bilaga-mcp setup\` to store one (${tokenPath()}), or set BILAGA_TOKEN. Only public tools will work until then.`);
   }
   const server = createServer(client);
   await server.connect(new StdioServerTransport());

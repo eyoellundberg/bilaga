@@ -10,7 +10,7 @@ const tools: [string, string][] = [
   ['send_file', 'Upload a local file and return a share_url valid for 30 days. Optional to, in_reply_to, sender, and resume.'],
   ['get_transfer, list_transfers, mark_sent, delete_transfer', 'Inspect, record delivery of, and revoke your transfers.'],
   ['list_inbox, download_file, acknowledge_received, pay_transfer', 'Receive transfers addressed to your account’s email.'],
-  ['get_account, get_balance, get_quote, get_config', 'Handle, credit, prices, and limits.'],
+  ['get_balance, get_quote, get_config', 'Credit, prices, and limits.'],
   ['list_events, get_receipt', 'Signed event log and delivery receipts.'],
   ['get_webhook, set_webhook, delete_webhook, test_webhook', 'One https webhook per account.'],
   ['create_file_request, list_file_requests, get_file_request, revoke_file_request, get_file_request_receipt', 'Collect files from people who have no account.'],
@@ -41,25 +41,35 @@ export default function Mcp() {
         <h2>1. Get a token</h2>
         <p>
           Sign in at <a className="text-link" href="/account">/account</a> and
-          create an agent token. It is shown once. Keep it in your MCP client’s
-          environment, never in a prompt or a shared URL.
+          create an agent token. It is shown once. Never put it in a prompt
+          or a shared URL.
         </p>
         <h2>2. Add the server</h2>
-        <p>Claude Code:</p>
-        <pre>{`claude mcp add bilaga -e BILAGA_TOKEN=YOUR_AGENT_TOKEN -- npx -y bilaga-mcp`}</pre>
-        <p>Claude Desktop, Cursor, and other clients that read a JSON config:</p>
+        <p>
+          The account page shows a ready-made one-liner next to every new
+          token. For Claude Code it is:
+        </p>
+        <pre>{`npx -y bilaga-mcp setup YOUR_TOKEN && claude mcp add -s user bilaga -- npx -y bilaga-mcp`}</pre>
+        <p>
+          Without the token argument, <code>npx -y bilaga-mcp setup</code>{' '}
+          asks for it interactively.
+        </p>
+        <p>
+          Setup stores the token in <code>~/.config/bilaga/token</code> with
+          owner-only permissions and checks it against Bilaga before saving.
+          Claude Desktop, Cursor, and other clients that read a JSON config,
+          after the same setup command:
+        </p>
         <pre>{`{
   "mcpServers": {
-    "bilaga": {
-      "command": "npx",
-      "args": ["-y", "bilaga-mcp"],
-      "env": { "BILAGA_TOKEN": "YOUR_AGENT_TOKEN" }
-    }
+    "bilaga": { "command": "npx", "args": ["-y", "bilaga-mcp"] }
   }
 }`}</pre>
         <p>
-          Node 20 or newer is required. Then ask the agent to send a file: it
-          calls <code>send_file</code> with the path and reports the link.
+          Node 20 or newer is required. Setting <code>BILAGA_TOKEN</code> in
+          the client’s environment works too and overrides the stored token.
+          Then ask the agent to send a file: it calls{' '}
+          <code>send_file</code> with the path and reports the link.
         </p>
         <h2>3. Tools</h2>
         <div style={{ overflowX: 'auto' }}>

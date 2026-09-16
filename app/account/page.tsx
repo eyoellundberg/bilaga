@@ -19,6 +19,8 @@ type Account = {
   top_ups: 'stripe_checkout' | 'unavailable';
   tokens: { id: string; label: string; created_at: number }[];
 };
+const setupCommand = (token: string) =>
+  `npx -y bilaga-mcp setup ${token} && claude mcp add -s user bilaga -- npx -y bilaga-mcp`;
 export default function AccountPage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [email, setEmail] = useState('');
@@ -261,10 +263,12 @@ export default function AccountPage() {
             </section>
             <RequestManager />
             <details>
-              <summary>Agent access</summary>
+              <summary>Agent access: tokens and MCP</summary>
               <p>
-                Each token gives an agent access to your transfers. Save it
-                securely; you can revoke it here anytime.
+                Click below to create a token. Each token gives an agent access
+                to your transfers. Save it securely; you can revoke it here
+                anytime. Other clients are covered on the{' '}
+                <a href="/mcp">MCP page</a>.
               </p>
               <form
                 onSubmit={(e) => {
@@ -300,6 +304,23 @@ export default function AccountPage() {
                     }
                   >
                     Copy token
+                  </button>
+                  <p>
+                    Using Claude Code? Paste this one line in a terminal and
+                    you are done. It stores the token on your machine and adds
+                    the Bilaga MCP server.
+                  </p>
+                  <code className="token-value">{setupCommand(agentToken)}</code>
+                  <button
+                    className="account-button"
+                    onClick={() =>
+                      act(async () => {
+                        await navigator.clipboard.writeText(setupCommand(agentToken));
+                        setMessage('Setup command copied.');
+                      })
+                    }
+                  >
+                    Copy setup command
                   </button>
                   <button
                     className="account-button secondary"

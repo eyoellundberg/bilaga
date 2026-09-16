@@ -160,7 +160,7 @@ test('public tools work without a token; private ones explain how to get one', a
     assert.equal(cfg.structuredContent.part_size_bytes, PART);
     const bal = await client.callTool({ name: 'get_balance', arguments: {} });
     assert.equal(bal.isError, true);
-    assert.match(bal.content[0].text, /BILAGA_TOKEN/);
+    assert.match(bal.content[0].text, /bilaga-mcp setup/);
   } finally {
     await close();
     server.close();
