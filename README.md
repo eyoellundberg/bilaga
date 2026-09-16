@@ -24,6 +24,8 @@ Use Node 22.13+, Python 3.10+, and npm ci. Keep .env and .bilaga-token ignored a
 
 Build with npm run build. Apply all local migrations with npx wrangler d1 migrations apply DB --local --config wrangler.cloudflare.json --persist-to .wrangler/state. Run the built Worker:
 
+Remote caveat: `d1 migrations apply --remote` sends each file to D1's query endpoint, which splits on every semicolon and fails with "incomplete input" on `CREATE TRIGGER ... BEGIN ... END` bodies (0009 is the first such file). Apply those with `npx wrangler d1 execute DB --remote --config wrangler.cloudflare.json --yes --file drizzle/<file>.sql`, then record them by hand: `--command "INSERT INTO d1_migrations(name) VALUES('<file>.sql')"`. Deploy the Worker immediately after.
+
 ```sh
 npx wrangler dev --config wrangler.cloudflare.json --ip 127.0.0.1 --local-upstream localhost:3119 --port 3119 --test-scheduled --persist-to .wrangler/state --env-file .env
 ```
