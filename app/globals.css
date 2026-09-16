@@ -792,7 +792,8 @@ footer {
   margin: 1rem 0 0.5rem;
   font-weight: 600;
 }
-.account-content input {
+.account-content input,
+.account-content textarea {
   display: block;
   width: 100%;
   max-width: 420px;
@@ -801,6 +802,10 @@ footer {
   border-radius: 8px;
   background: #fff;
   color: #15243a;
+}
+.account-content textarea {
+  min-height: 100px;
+  resize: vertical;
 }
 .account-button {
   display: inline-block;

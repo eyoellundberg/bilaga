@@ -81,3 +81,13 @@ The migration includes custom SQLite triggers, which must be retained: ledger wr
 These changes are local until migration 0009 and the new Worker are deployed together. Stop older Worker versions from writing balances after migration. Reverting only the Worker after new expiring purchases is unsafe: old code does not enforce expiry.
 
 Checkout uses server-owned `packs_2026_09` offer metadata. The signed webhook derives credit from the paid amount and the versioned offer, not a client-supplied bonus. Legacy sessions keep dollar-for-dollar credit; session-id idempotency remains in place. Validate both new packs in Stripe sandbox before live activation.
+
+## Multi-file requests — local implementation, 16 September 2026
+
+Migration `0010_file_requests.sql` adds general file requests. Account holders create a link from `/account` or `POST /api/requests`; a guest uploads multiple files at `/r/{id}#key=…` and clicks Done. File completion and collection submission are distinct. One atomic submission freezes the file/hash manifest and queues `request.submitted`; retries are idempotent. Bilaga records delivery facts. Application-specific payments, acceptance criteria and deadlines belong to the requester.
+
+Uploads reuse the existing quota, charge, multipart and receipt paths under a restricted request credential. Each file uses the requester's normal allowance or credit. The key is hashed at rest, sent in an Authorization header and kept in the page URL fragment (not the server URL). It cannot access unrelated transfers or reveal the requester's email/balance/download links. The supplied uploader email is unverified and only appears in owner-authenticated request details and the private signed submission receipt. Public file receipts distinguish the requester from the uploader.
+
+Defaults: 20 file attempts, 5 GB total, seven-day link lifetime. Requester-controlled caps cannot exceed normal account/file limits. Removed files still consume the request's attempt/byte caps. Closing a request expires pending uploads for cleanup; uploaded files retain normal storage expiry. Account deletion erases private request metadata. Existing webhooks deliver submission events at least once; consumers deduplicate event IDs. Detailed contract: `public/llms.txt`, section File requests.
+
+Run `npm run test:requests` against the LOCAL built Worker with a signing key. It covers multi-file completion, scopes, atomic Done/upload races, signed records, caps, billing and revocation. Deploy migration 0010 before the new Worker. This change has not been deployed by this task.

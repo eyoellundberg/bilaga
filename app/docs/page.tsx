@@ -48,6 +48,11 @@ const endpoints = [
     'GET /api/receipts/{public_id}',
     'Signed receipt with the content hash. No token needed.',
   ],
+  ['POST /api/requests', 'Create an account-free upload link for multiple files.'],
+  ['GET /api/requests', 'List your file requests.'],
+  ['GET /api/requests/{id}', 'Read files and submission status.'],
+  ['GET /api/requests/{id}/receipt', 'Fetch the private signed submission record after Done.'],
+  ['DELETE /api/requests/{id}', 'Close an upload request.'],
   ['GET /api/inbox', 'Transfers addressed to your account email.'],
   [
     'POST /api/inbox/{public_id}/received',
@@ -211,6 +216,10 @@ export default function Docs() {
             </table>
           </div>
         </details>
+        <h2>Collect files without signup</h2>
+        <p>Create a file request from your account or with <code>POST /api/requests</code>. Share the returned upload link. Anyone holding it can add multiple files without an account and click Done when finished. Each file uses your normal allowance or credit; Done adds no charge.</p>
+        <p>Use the signed <code>request.submitted</code> event to learn when the uploader has finished. It includes the request ID, your optional reference and the final file list. Individual <code>transfer.completed</code> events mean a file finished uploading, not that the collection is finished. Your application decides what to do next.</p>
+        <p>The private submission receipt records hashes, submission time and the email supplied by the uploader. That email is not verified and is never added to public file receipts. Links expire, can be closed, and cannot change files after Done. Defaults: 20 files, 5 GB total and 7 days; removed uploads count toward the request limits.</p>
         <h2>What it costs</h2>
         <p>
           {`Every account gets ${FREE_MONTHLY_TRANSFERS} transfers per rolling 30 days and ${gbLabel(FREE_STORED_BYTES)} stored free, so a free file is at most ${gbLabel(FREE_STORED_BYTES)}. Beyond that, a transfer is charged when it is created at ${usd(PRICE_CENTS_PER_GB)} per decimal GB with a ${usd(MINIMUM_CHARGE_CENTS)} minimum, rounded up to a cent, from a balance you add to by card on the account page: ${TOP_UP_PACKS.map((p) => `${p.name} is ${usd(p.amount_cents)} for ${usd(p.credit_cents)} of credit (up to ${p.up_to_gb} GB)`).join(', ')}. Both are one-time payments valid for ${CREDIT_VALIDITY_YEARS} years; the minimum charge means many small transfers cover fewer GB. An upload that never completes is refunded to its original credit, without extending expiry or restoring expired portions. Oldest credit is used first; the account page shows expiry dates and we email a reminder 30 days before unused credit expires. Stored files count until they expire or you delete them, up to ${gbLabel(MAX_STORED_BYTES)}. Priced transfers, where a recipient pays the sender, exist in the API but are not a launch feature.`}

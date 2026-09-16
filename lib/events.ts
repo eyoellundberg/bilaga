@@ -24,6 +24,7 @@ type EventRow = {
   last_status: number | null;
 };
 export type EventType =
+  | 'request.submitted'
   | 'transfer.completed'
   | 'transfer.downloaded'
   | 'transfer.received'
@@ -32,7 +33,7 @@ export type EventType =
   | 'transfer.deleted';
 
 // Time-ordered ids let GET /api/events?since=ID page without a second column.
-function eventId(now: number) {
+export function eventId(now: number) {
   const random = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) =>
     b.toString(16).padStart(2, '0'),
   ).join('');

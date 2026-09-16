@@ -35,8 +35,10 @@ export const transfers = sqliteTable(
     settlementId: text('settlement_id'),
     receiptRequests: integer('receipt_requests').notNull().default(0),
     chargedCents: integer('charged_cents').notNull().default(0),
+    requestId: text('request_id'),
   },
   (t) => [
+    index('idx_transfers_request').on(t.requestId, t.createdAt),
     index('idx_transfers_recipient').on(t.recipient, t.completedAt),
     index('idx_transfers_content_hash').on(t.contentHash),
     index('idx_transfers_owner_created').on(t.owner, t.createdAt),
@@ -188,3 +190,22 @@ export const creditAllocations = sqliteTable('credit_allocations', {
   lotId: text('lot_id').notNull(),
   cents: integer('cents').notNull(),
 }, (t) => [primaryKey({ columns: [t.ledgerId, t.lotId] })]);
+
+export const fileRequests = sqliteTable('file_requests', {
+  id: text('id').primaryKey(),
+  owner: text('owner').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  reference: text('reference'),
+  maxFiles: integer('max_files').notNull(),
+  maxFileBytes: integer('max_file_bytes').notNull(),
+  maxTotalBytes: integer('max_total_bytes').notNull(),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  submittedAt: integer('submitted_at'),
+  submissionEventId: text('submission_event_id'),
+  revokedAt: integer('revoked_at'),
+  uploaderEmail: text('uploader_email'),
+  manifest: text('manifest'),
+}, (t) => [index('idx_file_requests_owner').on(t.owner, t.createdAt)]);

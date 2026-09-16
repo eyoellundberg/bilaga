@@ -1,3 +1,4 @@
+import { requestRoutes } from './requests';
 import { creditSummary } from './credits';
 import { env } from 'cloudflare:workers';
 import { sha256 } from './hash';
@@ -356,6 +357,7 @@ export async function accountRoutes(
   }
   const account = await session(req);
   await limit(`account:${account.id}`, 60);
+  if (path[0] === 'account' && path[1] === 'requests') return requestRoutes(req, path.slice(1), account.id);
   if (route === 'account' && method === 'GET') {
     const [tokens, hook, totals, inbox, credits] = await Promise.all([
       db().prepare('SELECT id,label,created_at FROM api_tokens WHERE account_id=? ORDER BY created_at DESC')
@@ -470,6 +472,7 @@ export async function accountRoutes(
       db()
         .prepare('UPDATE transfers SET recipient=NULL WHERE recipient=?')
         .bind(account.email),
+      db().prepare('DELETE FROM file_requests WHERE owner=?').bind(account.id),
       db().prepare('DELETE FROM webhooks WHERE account_id=?').bind(account.id),
       db().prepare('DELETE FROM events WHERE account_id=?').bind(account.id),
     ]);

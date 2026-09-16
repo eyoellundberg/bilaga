@@ -51,7 +51,7 @@ export function proxy(request: NextRequest) {
     response.headers.set('Strict-Transport-Security', 'max-age=31536000');
   // Nonces and transfer metadata must never be cached or shared between visitors.
   response.headers.set('Cache-Control', 'private, no-store, max-age=0');
-  if (path.startsWith('/t/') || path.startsWith('/api/'))
+  if (path.startsWith('/t/') || path.startsWith('/r/') || path.startsWith('/api/'))
     response.headers.set('X-Robots-Tag', 'noindex, nofollow');
   return response;
 }

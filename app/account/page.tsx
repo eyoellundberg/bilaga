@@ -3,6 +3,7 @@ import { gbLabel, type describeLimits } from '@/lib/rules';
 /* oxlint-disable next/no-html-link-for-pages */
 import { useEffect, useState } from 'react';
 import { Brand } from '../brand';
+import { RequestManager } from './request-manager';
 
 type Account = {
   email: string;
@@ -258,6 +259,7 @@ export default function AccountPage() {
                 <p className="small">Card top-ups are not enabled yet.</p>
               )}
             </section>
+            <RequestManager />
             <details>
               <summary>Agent access</summary>
               <p>

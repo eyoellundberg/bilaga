@@ -1,3 +1,9 @@
+# Multi-file requests — 16 September 2026 (local, not deployed)
+
+General file requests are implemented. An account holder creates a scoped link, guests upload multiple files without signup, and Done freezes a signed submission manifest and queues one `request.submitted` event. Bilaga supplies files, hashes, submission time and an unverified uploader email; the requesting application owns acceptance criteria, payments and deadlines. Existing per-file billing is charged to the requester; Done adds no charge.
+
+Migration `0010_file_requests.sql` is applied locally and must be applied to the deployment database before publishing this Worker. API contract is in `public/llms.txt`. Guest upload links keep their secret in the URL fragment and authenticate API calls via a header. Request receipts and uploader emails require owner authentication. Revocation, account deletion, file/byte caps and concurrent Done/upload checks are implemented. Browser verification completed a two-file guest submission. The previous account/network/transfer/security suites passed; final request-specific verification is recorded below after completion.
+
 # Current update — 16 September 2026 (local changes, not deployed)
 
 Credit-expiry and review fixes are implemented locally. See [the current review](code-review-2026-09-16.md) for the exact scope and remaining production checks. Migration 0009 preserves existing balances, introduces purchase lots and FIFO allocations, and supplies transactional expiry/refund triggers. New Worker code displays expiry dates and schedules reminders. Grant writes are atomic, settlement guards use unique IDs, and webhook claims occur immediately before delivery.

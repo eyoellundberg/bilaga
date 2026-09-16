@@ -1,3 +1,4 @@
+import { authorizeDrop, assertRequestOpen, dropStatus, dropTransfer, submitRequest, requestRoutes, type FileRequest } from './requests';
 import { creditSummary, expireCredits } from './credits';
 import { json, fail, ApiError, bodyJson, boundedBody } from './http';
 import { accountRoutes, tokenOwner, cleanAccounts } from './accounts';
@@ -62,6 +63,7 @@ type Transfer = {
   paid_by: string | null;
   receipt_requests: number;
   charged_cents: number;
+  request_id: string | null;
 };
 type AccountIdentity = { id: string; email: string | null; handle: string | null };
 const EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i;
@@ -211,6 +213,7 @@ function publicData(t: Transfer) {
 function privateData(t: Transfer, origin: string) {
   return {
     id: t.id,
+    request_id: t.request_id,
     ...publicData(t),
     created_at: iso(t.created_at),
     completed_at: iso(t.completed_at),
@@ -241,6 +244,7 @@ function eventData(t: Transfer, origin: string) {
   return {
     id: t.id,
     public_id: t.public_id,
+    request_id: t.request_id,
     filename: t.filename,
     size_bytes: t.size,
     sender: t.sender,
@@ -263,7 +267,8 @@ async function inboxData(t: Transfer, origin: string) {
   return {
     ...publicData(t),
     public_id: t.public_id,
-    from_account: await handleOf(t.owner),
+    from_account: t.request_id ? null : await handleOf(t.owner),
+    request_id: t.request_id,
     completed_at: iso(t.completed_at),
     received_at: iso(t.received_at),
     paid_at: iso(t.paid_at),
@@ -294,17 +299,17 @@ async function markReceived(t: Transfer, account: AccountIdentity, origin: strin
 // A charge is only kept for a completed transfer. Abandoned or revoked uploads
 // give the balance back exactly once.
 async function refundIfUnfinished(t: Transfer) {
-  if (t.state === 'complete' || t.charged_cents <= 0) return;
+  if (t.completed_at !== null || t.charged_cents <= 0) return;
   const now = Date.now();
   await db().batch([
     db()
-      .prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND EXISTS(SELECT 1 FROM transfers WHERE id=? AND charged_cents>0 AND state<>'complete')`)
+      .prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND EXISTS(SELECT 1 FROM transfers WHERE id=? AND charged_cents>0 AND completed_at IS NULL)`)
       .bind(t.charged_cents, t.owner, t.id),
     db()
       .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
-        SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'refund',?,?,? WHERE EXISTS(SELECT 1 FROM transfers WHERE id=? AND charged_cents>0 AND state<>'complete')`)
+        SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'refund',?,?,? WHERE EXISTS(SELECT 1 FROM transfers WHERE id=? AND charged_cents>0 AND completed_at IS NULL)`)
       .bind(crypto.randomUUID().replaceAll('-', ''), t.owner, t.charged_cents, t.owner, t.id, `Upload of ${t.filename} did not complete`, now, t.id),
-    db().prepare(`UPDATE transfers SET charged_cents=0 WHERE id=? AND state<>'complete'`).bind(t.id),
+    db().prepare(`UPDATE transfers SET charged_cents=0 WHERE id=? AND completed_at IS NULL`).bind(t.id),
   ]);
 }
 async function removeBytes(t: Transfer) {
@@ -390,7 +395,8 @@ async function signedReceiptFor(t: Transfer) {
     content_hash: t.content_hash,
     content_hash_algorithm: CONTENT_HASH_ALGORITHM,
     sender: t.sender,
-    sender_account: await handleOf(t.owner),
+    sender_account: t.request_id ? null : await handleOf(t.owner),
+    ...(t.request_id ? { request_id: t.request_id, requester_account: await handleOf(t.owner) } : {}),
     addressed: !!t.recipient,
     recipient_account: t.received_by ? await handleOf(t.received_by) : null,
     received_at: iso(t.received_at),
@@ -664,10 +670,34 @@ export async function handleApi(req: Request) {
       (method === 'GET' || method === 'HEAD')
     )
       return await download(req, p[1]);
-    const owner = await authorize(req);
+    let guest: FileRequest | null = null;
+    if (p[0] === 'drop') {
+      await rateLimit(`drop-ip:${await sha256(new TextEncoder().encode(req.headers.get('CF-Connecting-IP') || 'local'))}`, 600);
+      guest = await authorizeDrop(req, p[1] || '');
+      await rateLimit(`drop:${guest.id}`, 300);
+      if (p.length === 2 && method === 'GET') return await dropStatus(guest);
+      if (p.length === 3 && p[2] === 'submit' && method === 'POST') return await submitRequest(req, guest);
+      // Explicit allowlist: a drop credential can never reach balances, inbox,
+      // tokens, other requests, or the requester's unrelated transfers.
+      const route = p.slice(2);
+      const allowed = route[0] === 'transfers' && (
+        (route.length === 1 && method === 'POST') ||
+        (route.length === 2 && ['GET','DELETE'].includes(method)) ||
+        (route.length === 3 && route[2] === 'complete' && method === 'POST') ||
+        (route.length === 4 && route[2] === 'parts' && method === 'PUT')
+      );
+      if (!allowed) return fail(404, 'not_found', 'Upload endpoint not found.');
+      if (method !== 'GET') assertRequestOpen(guest);
+      p.splice(0, 2);
+    }
+    const owner = guest?.owner ?? await authorize(req);
     await rateLimit(`owner:${owner}`, 300);
     if (owner.length !== 64) await expireCredits(owner);
-    // Until card top-ups exist, the operator token grants credit by email.
+    if (p[0] === 'requests') {
+      if (method === 'POST') await rateLimit(`request-create:${owner}`, 20);
+      return await requestRoutes(req, p, owner);
+    }
+    // The operator can grant credit by email.
     if (p.length === 1 && p[0] === 'credits' && method === 'POST') {
       if (owner !== bindings().BILAGA_TOKEN_HASH)
         return fail(403, 'forbidden', 'Owner access required.');
@@ -785,6 +815,13 @@ export async function handleApi(req: Request) {
       const body = await bodyJson(req);
       if (!body || typeof body !== 'object' || Array.isArray(body))
         return fail(400, 'invalid_json', 'Send a JSON object.');
+      if (guest) {
+        if (Object.keys(body).some(key => !['filename','size_bytes'].includes(key)))
+          return fail(400, 'invalid_request', 'Request uploads accept only filename and size_bytes.');
+        const requester = await accountIdentity(owner);
+        if (!requester?.email) return fail(410, 'request_closed', 'This request is no longer available.');
+        body.to = requester.email;
+      }
       if (!validSize(body.size_bytes))
         return fail(
           400,
@@ -874,7 +911,7 @@ export async function handleApi(req: Request) {
             return fail(
               402,
               'insufficient_balance',
-              `This transfer is outside your free allowance (${fileLabel(limits.free_stored_bytes)} stored, ${limits.free_transfers_per_30_days} transfers per 30 days) and costs ${(charge / 100).toFixed(2)} USD. Your balance is ${((usage?.balance ?? 0) / 100).toFixed(2)} USD. Add credit at ${u.origin}/account.`,
+              guest ? 'The requester needs to add credit before this file can be uploaded. Please contact them.' : `This transfer is outside your free allowance (${fileLabel(limits.free_stored_bytes)} stored, ${limits.free_transfers_per_30_days} transfers per 30 days) and costs ${(charge / 100).toFixed(2)} USD. Your balance is ${((usage?.balance ?? 0) / 100).toFixed(2)} USD. Add credit at ${u.origin}/account.`,
             );
         }
       }
@@ -883,8 +920,11 @@ export async function handleApi(req: Request) {
       // Reserve quota, the charge, and the record atomically BEFORE allocating any storage.
       const results = await db().batch([
         db()
-          .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,price_cents,charged_cents,state,created_at,expires_at)
-      SELECT ?,?,?,?,?,?,?,?,?,?,'initializing',?,? WHERE
+          .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,price_cents,charged_cents,state,created_at,expires_at,request_id)
+      SELECT ?,?,?,?,?,?,?,?,?,?,'initializing',?,?,? WHERE
+      (? IS NULL OR EXISTS(SELECT 1 FROM file_requests r WHERE r.id=? AND r.owner=? AND r.submitted_at IS NULL AND r.revoked_at IS NULL AND r.expires_at>?
+        AND ?<=r.max_file_bytes AND (SELECT COUNT(*) FROM transfers WHERE request_id=r.id)<r.max_files
+        AND COALESCE((SELECT SUM(size) FROM transfers WHERE request_id=r.id),0)+?<=r.max_total_bytes)) AND
       (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL AND balance_cents>=?)) AND
       (length(?)=64 OR ?>0 OR (
         (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND state<>'deleted') < ? AND
@@ -894,7 +934,8 @@ export async function handleApi(req: Request) {
       COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ? RETURNING id`)
           .bind(
             id, publicId, owner, filename, body.size_bytes, body.sender || null, recipient, inReplyTo, price, charge,
-            now, now + DAY,
+            now, now + DAY, guest?.id ?? null,
+            guest?.id ?? null, guest?.id ?? null, owner, now, body.size_bytes, body.size_bytes,
             owner, owner, charge,
             owner, charge, owner, now - MONTH, limits.free_transfers_per_30_days,
             owner, body.size_bytes, limits.free_stored_bytes,
@@ -913,7 +954,7 @@ export async function handleApi(req: Request) {
         return fail(
           429,
           'account_limit',
-          `Limit reached: ${limits.max_pending_uploads} unfinished upload${limits.max_pending_uploads === 1 ? '' : 's'}, ${fileLabel(limits.max_stored_bytes)} reserved storage, or an insufficient balance.`,
+          guest ? 'The request is closed or its file, size, or account allowance has been reached. Contact the requester.' : `Limit reached: ${limits.max_pending_uploads} unfinished upload${limits.max_pending_uploads === 1 ? '' : 's'}, ${fileLabel(limits.max_stored_bytes)} reserved storage, or an insufficient balance.`,
         );
       let multi: R2MultipartUpload | undefined;
       try {
@@ -941,7 +982,7 @@ export async function handleApi(req: Request) {
       }
       const t = await owned(id, owner);
       return json(
-        { ...privateData(t, u.origin), upload_expires_at: iso(now + DAY) },
+        guest ? dropTransfer(t) : { ...privateData(t, u.origin), upload_expires_at: iso(now + DAY) },
         201,
       );
     }
@@ -959,10 +1000,18 @@ export async function handleApi(req: Request) {
     if (!/^[a-f0-9]{32}$/.test(p[1] || ''))
       return fail(404, 'not_found', 'Transfer not found.');
     let t = await owned(p[1], owner);
+    if (guest && t.request_id !== guest.id) return fail(404, 'not_found', 'File not found in this request.');
     if (p.length === 2 && method === 'GET')
-      return json({ ...privateData(t, u.origin), parts: await uploadParts(t) });
+      return json({ ...(guest ? dropTransfer(t) : privateData(t, u.origin)), parts: await uploadParts(t) });
     if (p.length === 2 && method === 'DELETE') {
       const wasComplete = t.state === 'complete';
+      if (guest) {
+        // Reserve removal before touching R2; Done snapshots this same state.
+        const removed = await db().prepare(`UPDATE transfers SET state='deleted' WHERE id=? AND EXISTS(
+          SELECT 1 FROM file_requests WHERE id=? AND submitted_at IS NULL AND revoked_at IS NULL AND expires_at>?
+        ) RETURNING id`).bind(t.id, guest.id, Date.now()).first();
+        if (!removed) return fail(409, 'request_closed', 'This request no longer accepts changes.');
+      }
       await removeBytes(t);
       if (wasComplete) await recordEvent(owner, 'transfer.deleted', eventData(t, u.origin));
       return json({ id: t.id, status: 'deleted' });
@@ -1030,7 +1079,7 @@ export async function handleApi(req: Request) {
     }
 
     if (p[2] === 'complete' && p.length === 3 && method === 'POST') {
-      if (t.state === 'complete') return json(privateData(t, u.origin));
+      if (t.state === 'complete') return json(guest ? dropTransfer(t) : privateData(t, u.origin));
       const parts = await uploadParts(t);
       if (
         parts.length !== Math.ceil(t.size / PART_BYTES) ||
@@ -1089,13 +1138,15 @@ export async function handleApi(req: Request) {
       const limits = await limitsFor(owner);
       await db()
         .prepare(
-          "UPDATE transfers SET state='complete',completed_at=?,expires_at=?,upload_id=NULL,content_hash=? WHERE id=? AND state IN ('uploading','completing')",
+          `UPDATE transfers SET state='complete',completed_at=?,expires_at=?,upload_id=NULL,content_hash=? WHERE id=? AND state IN ('uploading','completing')
+          AND (request_id IS NULL OR EXISTS(SELECT 1 FROM file_requests r JOIN accounts a ON a.id=r.owner
+            WHERE r.id=transfers.request_id AND r.submitted_at IS NULL AND r.revoked_at IS NULL AND r.expires_at>? AND a.deleted_at IS NULL))`,
         )
-        .bind(now, now + limits.retention_ms, digest, t.id)
+        .bind(now, now + limits.retention_ms, digest, t.id, now)
         .run();
       t = await owned(t.id, owner);
       // Deletion can race completion; never revive a revoked transfer or keep its bytes.
-      if (t.state === 'deleted') {
+      if (t.state !== 'complete') {
         await db()
           .prepare('UPDATE transfers SET purged_at=NULL WHERE id=?')
           .bind(t.id)
@@ -1125,7 +1176,7 @@ export async function handleApi(req: Request) {
             expires_at: iso(t.expires_at),
           });
       }
-      return json(privateData(t, u.origin));
+      return json(guest ? dropTransfer(t) : privateData(t, u.origin));
     }
     if (p[2] === 'sent' && p.length === 3 && method === 'POST') {
       if (t.state !== 'complete')
