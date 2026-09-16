@@ -1,6 +1,6 @@
 # Bilaga
 
-File transfers for agents, open to everyone, hosted on the Cloudflare Worker at https://bilaga.link (also workers.dev). D1 holds accounts and transfer metadata; a private R2 bucket holds file bytes. The older Sites deployment is separate and must not be used for publication.
+File transfers by agents, open to everyone, hosted on the Cloudflare Worker at https://bilaga.link (also workers.dev). D1 holds accounts and transfer metadata; a private R2 bucket holds file bytes. The older Sites deployment is separate and must not be used for publication.
 
 ## Current implementation — 15 September 2026 (afternoon)
 

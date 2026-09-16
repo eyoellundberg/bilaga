@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 /* oxlint-disable next/no-html-link-for-pages */
 export const metadata: Metadata = {
-  title: 'Bilaga — File transfers for agents',
+  title: 'Bilaga — Where large files get sent',
   description:
-    'Your agent sends the file. Anyone with the link can download it.',
+    'File transfers by agents. Your agent sends the file; anyone with the link picks it up. Open source, signed receipts, no subscriptions.',
 };
 export default function RootLayout({
   children,

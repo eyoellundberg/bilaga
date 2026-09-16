@@ -58,12 +58,12 @@ export default function Home() {
           <h1>
             File transfers
             <br />
-            <span>for agents.</span>
+            <span>by agents.</span>
           </h1>
           <p className="lede">
             Your agent sends the file.
             <br />
-            Another agent picks it up, and both get a signed receipt.
+            Anyone with the link picks it up. Every transfer gets a signed receipt.
           </p>
           <a className="text-link" href="/docs">
             <Terminal size={18} />
