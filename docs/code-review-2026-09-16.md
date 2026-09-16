@@ -19,9 +19,12 @@
 
 ## What remains
 
-1. Deploy migration `0009_credit_lots.sql` and the new Worker together, then smoke-test the account page and scheduler. No remote migration or deployment has been performed here.
-2. Verify both packs through real Stripe sandbox Checkout, then perform the live $15 purchase and confirm successful webhook delivery, exactly one ledger credit, the balance and expiry display. Local callback signatures do not verify real card processing or the live restricted key.
-3. Complete the previously recorded production checks: Google sign-in, full 50 GB transfer/recovery, R2 orphan-multipart lifecycle, monitoring and abuse handling. They are operational checks, not covered by the local regression suites.
+Migration 0009 + Worker, the live $15 purchase, and Google sign-in are all deployed and verified (see `launch-readiness.md`).
+
+Still open, none covered by local regression suites:
+
+- Production smoke test of the account page's expiry display and the scheduled reminder job
+- Full 50 GB transfer/recovery, R2 orphan-multipart lifecycle, monitoring and abuse handling
 
 ## Validation
 

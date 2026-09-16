@@ -10,7 +10,7 @@ Worker version 048b038f deployed (commits ca2770a, b94f48c, 5a72879). Live check
 
 # Abuse policy — 16 September 2026
 
-/terms gains an "Abuse and takedowns" section: files are unscanned, reports go by email to the operator contact with the link, the operator removes offending files, closes the sending account and replies to the reporter; the receipt stays, redacted. This closes the open policy item in "Missing before public enrollment". The 50 GB reliability run and the Google sign-in click-through were deliberately skipped for launch day at the co-founder's call; both remain listed as unverified in production. The revised Plus/Pro offer was already live before this change (/api/config reports both packs and 5 free transfers). The live $15 purchase is still the operator's to make.
+/terms gains an "Abuse and takedowns" section: unscanned files, reports by email to the operator, removal plus account closure, receipt kept redacted. This closes the open policy item below. The 50 GB reliability run was skipped for launch day at the co-founder's call and is still unverified in production; Google sign-in and the live $15 purchase, once in the same boat, are now both verified.
 
 # Multi-file requests — deployed 16 September 2026
 
@@ -20,11 +20,9 @@ General file requests are implemented. An account holder creates a scoped link, 
 
 Migration `0010_file_requests.sql` is applied locally and must be applied to the deployment database before publishing this Worker. API contract is in `public/llms.txt`. Guest upload links keep their secret in the URL fragment and authenticate API calls via a header. Request receipts and uploader emails require owner authentication. Revocation, account deletion, file/byte caps and concurrent Done/upload checks are implemented. Browser verification completed a two-file guest submission. The previous account/network/transfer/security suites passed; final request-specific verification is recorded below after completion.
 
-# Current update — 16 September 2026 (local changes, not deployed)
+# Credit-expiry and review fixes — deployed 16 September 2026
 
-Credit-expiry and review fixes are implemented locally. See [the current review](code-review-2026-09-16.md) for the exact scope and remaining production checks. Migration 0009 preserves existing balances, introduces purchase lots and FIFO allocations, and supplies transactional expiry/refund triggers. New Worker code displays expiry dates and schedules reminders. Grant writes are atomic, settlement guards use unique IDs, and webhook claims occur immediately before delivery.
-
-**Next release:** apply migration 0009 and deploy the Worker together; verify the account page, scheduled job, both Stripe packs in sandbox and one live purchase. Old deployment notes below are historical evidence and contain superseded requirements. No production changes were made during this code review.
+Migration 0009 (purchase lots, FIFO spend/refund, expiry display and reminders) and its Worker (version 995b29cc, commit `73218df`) are live — confirmed via remote `d1_migrations` and `/api/config` reporting `credit_validity_years: 3`. The live $15 purchase is verified end to end. See [the code review](code-review-2026-09-16.md) for scope and the one thing still open: a production smoke test of the account page's expiry display and the reminder job. Older notes below are historical and superseded.
 
 # Legal pages rewritten (16 September 2026)
 
