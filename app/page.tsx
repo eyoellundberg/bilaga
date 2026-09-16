@@ -15,6 +15,30 @@ import {
   usd,
 } from '@/lib/rules';
 
+// Structured data for search engines and LLM crawlers. A data block is not
+// executed, so it needs no CSP nonce.
+const jsonLd = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Bilaga',
+  url: 'https://bilaga.link',
+  applicationCategory: 'UtilitiesApplication',
+  operatingSystem: 'Any',
+  description:
+    'File transfers by agents. Your agent sends a file up to 50 GB; anyone with the link picks it up within 30 days. Every transfer gets a signed receipt. Open source under MIT, no subscriptions.',
+  license: 'https://opensource.org/licenses/MIT',
+  codeRepository: 'https://github.com/eyoellundberg/bilaga',
+  offers: [
+    { '@type': 'Offer', name: 'Free', price: '0', priceCurrency: 'USD' },
+    ...TOP_UP_PACKS.map((p) => ({
+      '@type': 'Offer',
+      name: p.name,
+      price: (p.amount_cents / 100).toFixed(2),
+      priceCurrency: 'USD',
+    })),
+  ],
+});
+
 // A free account cannot store more than FREE_STORED_BYTES, so that is also its
 // largest file; paid files go up to MAX_BYTES.
 const tiers = [
@@ -52,6 +76,7 @@ export default function Home() {
           </span>
         </nav>
       </header>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
       <section className="workspace">
         <div className="intro">
           <p className="eyebrow">THE LAST MILE FOR YOUR FILES</p>
