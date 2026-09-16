@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bilaga client. Python 3.10+, standard library only. Set BILAGA_TOKEN to send; receipts verify without a token."""
+"""Bilaga client. Python 3.10+, standard library only. Set BILAGA_TOKEN to send or manage file requests; receipts verify and request-link uploads (--link) work without a token."""
 # SPDX-License-Identifier: MIT
 import argparse
 import hashlib
@@ -33,7 +33,22 @@ actions.add_argument('--webhook', metavar='URL', help='Register an https webhook
 actions.add_argument('--verify-event', action='store_true', help='Verify a signed event JSON body from stdin against the published key')
 actions.add_argument('--pay', metavar='PUBLIC_ID', help='Pay for a priced transfer addressed to you from your balance, then it can be downloaded')
 actions.add_argument('--balance', action='store_true', help='Show your balance and recent ledger')
-parser.add_argument('--resume', help='Resume a known upload ID; use with the same --file')
+actions.add_argument('--request', metavar='TITLE', help='Create a file request and print its upload link to share with the uploader')
+actions.add_argument('--requests', action='store_true', help='List your file requests')
+actions.add_argument('--request-status', metavar='REQUEST_ID', help='Show a request, its files and the submission if Done was clicked')
+actions.add_argument('--request-revoke', metavar='REQUEST_ID', help='Revoke a request link')
+actions.add_argument('--request-receipt', metavar='REQUEST_ID', help='Fetch and verify the signed submission receipt of a request')
+actions.add_argument('--drop-file', type=Path, metavar='FILE', help='With --link: upload a file to a request link; no token needed')
+actions.add_argument('--drop-status', action='store_true', help='With --link: show the request and the files added so far')
+actions.add_argument('--drop-remove', metavar='TRANSFER_ID', help='With --link: remove a file you added before Done')
+actions.add_argument('--done', metavar='EMAIL', help='With --link: declare the collection finished (Done) with your email')
+parser.add_argument('--link', metavar='UPLOAD_URL', help='The request upload link, including its #key= part, for the --drop-*/--done actions')
+parser.add_argument('--description', default='', help='With --request: instructions shown to the uploader')
+parser.add_argument('--reference', help='With --request: an opaque reference returned in the submission event')
+parser.add_argument('--max-files', type=int, help='With --request: file count cap (default 20)')
+parser.add_argument('--max-bytes', type=int, help='With --request: total byte cap (default 5 GB; also caps each file)')
+parser.add_argument('--expires-in', type=int, metavar='SECONDS', help='With --request: link lifetime (default 7 days, max 30)')
+parser.add_argument('--resume', help='Resume a known upload ID; use with the same --file or --drop-file')
 parser.add_argument('--verify', type=Path, metavar='DOWNLOADED_FILE', help='With --receipt: check a downloaded file against the receipt')
 parser.add_argument('--to', metavar='EMAIL', help='With --file: address the transfer to a recipient; it appears in their inbox')
 parser.add_argument('--reply-to', metavar='PUBLIC_ID', help='With --file: reply to a transfer you received; --to defaults to its sender')
@@ -49,6 +64,19 @@ if url.scheme!='https' and not (url.scheme=='http' and url.hostname in ('localho
 if url.username or url.password or url.path or url.query or url.fragment:
     parser.error('--base must be an origin without credentials, path, query, or fragment.')
 token=os.environ.get('BILAGA_TOKEN','').strip()
+guest=args.drop_file or args.drop_status or args.drop_remove or args.done
+drop=''
+if guest:
+    # The upload link carries the request id in its path and the secret in its fragment; the secret becomes the bearer.
+    if not args.link:parser.error('The --drop-*/--done actions need --link UPLOAD_URL.')
+    link=urlparse(args.link)
+    parts=link.path.rstrip('/').split('/')
+    key=dict(pair.split('=',1) for pair in link.fragment.split('&') if '=' in pair).get('key','')
+    if len(parts)!=3 or parts[1]!='r' or not key:parser.error('--link must look like https://bilaga.link/r/REQUEST_ID#key=SECRET.')
+    if f'{link.scheme}://{link.netloc}'!=origin:parser.error('--link must be on the same origin as --base.')
+    token=key;drop='drop/'+parts[2]+'/'
+elif args.link:
+    parser.error('--link is only used with the --drop-*/--done actions.')
 if not token and not (args.receipt or args.verify_event or args.receipt_hash):
     parser.error('Set BILAGA_TOKEN in your environment; do not put tokens in download links.')
 opener=build_opener(NoRedirect)
@@ -195,14 +223,46 @@ try:
         result=api('transfers/'+args.delete,'DELETE',retry=True)
     elif args.sent:
         result=api('transfers/'+args.sent+'/sent','POST',retry=True)
+    elif args.request:
+        create={'title':args.request,'description':args.description}
+        if args.reference:create['reference']=args.reference
+        if args.max_files is not None:create['max_files']=args.max_files
+        if args.max_bytes is not None:create['max_total_bytes']=args.max_bytes
+        if args.expires_in is not None:create['expires_in_seconds']=args.expires_in
+        result=api('requests','POST',create)
+        print('Share the whole upload_url with the uploader, including the #key= part. It is shown only now.',file=sys.stderr)
+    elif args.requests:
+        result=api('requests')
+    elif args.request_status:
+        result=api('requests/'+args.request_status)
+    elif args.request_revoke:
+        result=api('requests/'+args.request_revoke,'DELETE',retry=True)
+    elif args.request_receipt:
+        signed=api('requests/'+args.request_receipt+'/receipt')
+        checks,submission=verify_signed(signed,'submission')
+        checks['request_matches']=submission.get('request_id')==args.request_receipt and submission.get('content_hash_algorithm')=='bilaga-chunked-sha256-8mib'
+        result={'verified':all(checks.values()),'checks':checks,'submission':submission}
+        print(json.dumps(result,indent=2))
+        sys.exit(0 if result['verified'] else 2)
+    elif args.drop_status:
+        result=api(drop)
+    elif args.drop_remove:
+        result=api(drop+'transfers/'+args.drop_remove,'DELETE',retry=True)
+    elif args.done:
+        result=api(drop+'submit','POST',{'email':args.done},retry=True)
     else:
-        path=args.file
+        path=args.file or args.drop_file
         size=path.stat().st_size
-        config=api('config')
-        if not 0<size<=config['max_file_bytes']:
-            raise RuntimeError(f"File must be non-empty and no larger than {config['max_file_bytes']} bytes.")
+        if drop:
+            request_info=api(drop)
+            if request_info['status']!='open':raise RuntimeError(f"This request is {request_info['status']} and no longer accepts files.")
+            limit=request_info['max_file_bytes']
+        else:
+            limit=api('config')['max_file_bytes']
+        if not 0<size<=limit:
+            raise RuntimeError(f"File must be non-empty and no larger than {limit} bytes.")
         if args.resume:
-            transfer=api('transfers/'+args.resume)
+            transfer=api(drop+'transfers/'+args.resume)
             if transfer['filename']!=path.name or transfer['size_bytes']!=size:
                 raise RuntimeError('Resume requires the same file name and size. Do not modify the file between attempts.')
         else:
@@ -211,7 +271,7 @@ try:
             if args.reply_to:create['in_reply_to']=args.reply_to
             if args.sender:create['sender']=args.sender
             if args.price is not None:create['price_cents']=args.price
-            transfer=api('transfers','POST',create)
+            transfer=api(drop+'transfers','POST',create)
         tid=transfer['id']
         print('Transfer ID: '+tid+' (use --resume with the same unchanged file if interrupted)',file=sys.stderr)
         if transfer['status']=='complete':
@@ -222,9 +282,9 @@ try:
                 n=1
                 while chunk:=file.read(transfer['part_size_bytes']):
                     if n not in uploaded:
-                        api(f'transfers/{tid}/parts/{n}','PUT',chunk,retry=True)
+                        api(f'{drop}transfers/{tid}/parts/{n}','PUT',chunk,retry=True)
                     n+=1
-            result=api(f'transfers/{tid}/complete','POST',retry=True)
+            result=api(f'{drop}transfers/{tid}/complete','POST',retry=True)
     print(json.dumps(result,indent=2))
 except (RuntimeError,OSError,KeyError) as e:
     print(str(e),file=sys.stderr)

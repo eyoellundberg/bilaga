@@ -161,6 +161,38 @@ assert len(ids)==len(set(ids)) and len(ids)==sql(f"SELECT COUNT(*) AS n FROM fil
 sql(f"UPDATE accounts SET deleted_at=1,email=NULL WHERE id='{owner}'")
 api(base,token=key,expect=404)
 sql(f"UPDATE accounts SET deleted_at=NULL,email='{owner}@example.invalid' WHERE id='{owner}'")
+# The Python client covers both sides: requester commands with a token, uploader commands with only the link.
+def client(*argv,token='',stdin=None,expect=0):
+    global checks
+    checks+=1
+    env=dict(os.environ); env.pop('BILAGA_TOKEN',None)
+    if token: env['BILAGA_TOKEN']=token
+    run=subprocess.run(['python3','public/bilaga.py','--base',BASE,*argv],env=env,capture_output=True,text=True,input=stdin)
+    assert run.returncode==expect,(argv,run.returncode,run.stdout[-300:],run.stderr[-300:])
+    return json.loads(run.stdout) if run.stdout.strip().startswith('{') else run.stdout
+made=client('--request','Client request','--reference','cli-1','--max-files','3','--max-bytes','100',token=token)
+assert made['status']=='open' and made['upload_url'].startswith(BASE+'/r/')
+assert any(r['id']==made['id'] for r in client('--requests',token=token)['requests'])
+link=made['upload_url']
+client('--drop-status',expect=2)                     # --link is required
+client('--drop-status','--link','https://elsewhere.invalid/r/'+made['id']+'#key=aa',expect=2)
+client('--done','x@example.invalid','--link',link,expect=1)   # nothing uploaded yet
+Path('.wrangler/cli-one.txt').write_bytes(b'cli-one'); Path('.wrangler/cli-two.txt').write_bytes(b'cli-two')
+first=client('--drop-file','.wrangler/cli-one.txt','--link',link)
+assert first['status']=='complete' and 'share_url' not in first
+second=client('--drop-file','.wrangler/cli-two.txt','--link',link)
+removed=client('--drop-remove',second['id'],'--link',link)
+assert len(client('--drop-status','--link',link)['files'])==1
+client('--drop-file','.wrangler/cli-two.txt','--link',link)
+submitted=client('--done','cli-uploader@example.invalid','--link',link)
+assert submitted['status']=='submitted' and len(submitted['files'])==2
+client('--drop-file','.wrangler/cli-one.txt','--link',link,expect=1)   # closed after Done
+status=client('--request-status',made['id'],token=token)
+assert status['uploader_email']=='cli-uploader@example.invalid' and len(status['submission'])==2
+verified=client('--request-receipt',made['id'],token=token)
+assert verified['verified'] and verified['submission']['reference']=='cli-1'
+client('--request-receipt',made['id'],token=other_token,expect=1)
+assert client('--request-revoke',made['id'],token=token)['status']=='revoked'
 # Keep a disposable open link for a browser smoke test, with no production identity.
 preview,preview_key=create(title='Files for your project',description='Add your document, cover and any supporting files. Click Done when you have added everything.')
 Path('.wrangler/request-preview.json').write_text(json.dumps({'url':preview['upload_url'],'owner':owner,'token':token,'request_id':preview['id']}))
