@@ -1,5 +1,7 @@
 # MCP server — deployed 16 September 2026
 
+Update, later the same day: `bilaga-mcp` 0.2.0 published. `setup [TOKEN]` validates and stores the token in `~/.config/bilaga/token`; the account page shows a one-line install next to each new token; `get_account` removed because /api/account is session-only (llms.txt corrected). Worker version 143b2026-ae7d-4a53-8ae2-af2820c3ab33. Cold `npx -y bilaga-mcp@0.2.0 setup` from a cleaned npm cache rejected a bad token and accepted the owner token. A real account token exercised `get_balance` through the server; the other account tools remain untested with a real account.
+
 `bilaga-mcp` 0.1.0 is published on npm (stdio MCP server, 24 tools; source in `mcp/`). Worker version 9331ebbb-ad5f-462b-bb2f-ffa98efc71da adds the /mcp page, a link from /docs, a sitemap entry, and an llms.txt entry. Live check: /, /docs, /mcp, /llms.txt and /sitemap.xml return 200 and the page shows the npx command. Before publishing, an owner-token round trip through the server over stdio uploaded a 41-byte file, downloaded it from the public link, and deleted it. Package tests (5) cover upload, part retry, resume, error mapping, download and the no-token case. Not yet tested: the account tools (inbox, balance, events, webhooks, requests) with a real account token, and `npx -y bilaga-mcp` from a clean machine.
 
 # Launch-day copy, abuse policy and SEO — deployed 16 September 2026
