@@ -61,7 +61,7 @@ export const feeCents = (price: number) => Math.floor((price * FEE_BPS) / 10_000
 export const validPrice = (v: unknown): v is number =>
   typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= MAX_PRICE_CENTS;
 export function quoteCents(bytes: number) {
-  return Math.max(MINIMUM_CHARGE_CENTS, Math.ceil((bytes / 1_000_000_000) * PRICE_CENTS_PER_GB));
+  return Math.max(MINIMUM_CHARGE_CENTS, Math.ceil((bytes * PRICE_CENTS_PER_GB) / 1_000_000_000));
 }
 export function validSize(bytes: unknown): bytes is number {
   return (
@@ -105,4 +105,13 @@ export function cleanFilename(value: unknown): string {
 }
 export function contentDisposition(name: string) {
   return `attachment; filename="${name.replace(/[^a-zA-Z0-9._ -]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;
+}
+
+export function creditExpiry(purchasedAt: number) {
+  const date = new Date(purchasedAt);
+  const month = date.getUTCMonth();
+  date.setUTCFullYear(date.getUTCFullYear() + CREDIT_VALIDITY_YEARS);
+  // February 29 purchases expire on February 28 in a non-leap year.
+  if (date.getUTCMonth() !== month) date.setUTCDate(0);
+  return date.getTime();
 }

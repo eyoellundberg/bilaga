@@ -73,3 +73,5 @@ Account creation, sign-in (email link, or Google where configured), token creati
 ## Privacy and terms
 
 /privacy and /terms describe the service, essential cookies, account erasure, public-link access, unscanned files, chunk limits, and recovery. They remain drafts with Lorem ipsum operator/contact placeholders and unresolved provider/legal details. Do not claim these policies are final or that the service is ready for unrestricted public enrollment.
+
+Credit expiry: GET /api/balance and GET /api/account include credit_lots (id, source, remaining_cents, created_at, expires_at; timestamps are Unix milliseconds and null expiry means no expiry). New pack purchases expire after three calendar years; oldest credit is used first. Existing balances keep non-expiring terms. Abandoned-upload refunds restore original lots without extending expiry or restoring expired portions. Bilaga emails a reminder 30 days before unused credit expires. Paid and promotional credit are tracked separately; neither is withdrawable cash.

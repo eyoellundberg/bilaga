@@ -1,5 +1,5 @@
 'use client';
-import { gbLabel } from '@/lib/rules';
+import { gbLabel, type describeLimits } from '@/lib/rules';
 /* oxlint-disable next/no-html-link-for-pages */
 import { useEffect, useState } from 'react';
 import { Brand } from '../brand';
@@ -8,22 +8,13 @@ type Account = {
   email: string;
   handle: string | null;
   balance_cents: number;
+  credit_lots: { id: string; source: string; remaining_cents: number; expires_at: number | null }[];
   last_login_method: string | null;
   inbox_count: number;
   download_requests_total: number;
   receipt_requests_total: number;
   webhook_url: string | null;
-  limits: {
-    max_file_bytes: number;
-    max_stored_bytes: number;
-    free_stored_bytes: number;
-    free_transfers_per_30_days: number;
-    retention_days: number;
-    price_cents_per_gb: number;
-    minimum_charge_cents: number;
-    top_up_packs: { name: string; amount_cents: number; credit_cents: number; up_to_gb: number }[];
-    credit_validity_years: number;
-  };
+  limits: ReturnType<typeof describeLimits>;
   top_ups: 'stripe_checkout' | 'unavailable';
   tokens: { id: string; label: string; created_at: number }[];
 };
@@ -232,6 +223,18 @@ export default function AccountPage() {
                 <strong>${(account.balance_cents / 100).toFixed(2)}</strong> in credit.
                 {` ${account.limits.top_up_packs.map((p) => `${p.name} is $${p.amount_cents / 100} for $${p.credit_cents / 100} of credit (up to ${p.up_to_gb} GB)`).join('; ')}. Paid once, valid for ${account.limits.credit_validity_years} years, never a subscription.`}
               </p>
+              {account.credit_lots.length > 0 && (
+                <ul className="small">
+                  {account.credit_lots.map((lot) => (
+                    <li key={lot.id}>
+                      ${(lot.remaining_cents / 100).toFixed(2)}
+                      {lot.source === 'promotion' ? ' promotional credit' : ' credit'}
+                      {lot.expires_at ? ` · expires ${new Date(lot.expires_at).toISOString().slice(0, 10)} (UTC)` : ' · no expiry'}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="small">Oldest credit is used first. We email a reminder 30 days before unused credit expires.</p>
               {account.top_ups === 'stripe_checkout' ? (
                 <p>
                   {account.limits.top_up_packs.map((pack) => (

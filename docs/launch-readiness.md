@@ -1,3 +1,9 @@
+# Current update — 16 September 2026 (local changes, not deployed)
+
+Credit-expiry and review fixes are implemented locally. See [the current review](code-review-2026-09-16.md) for the exact scope and remaining production checks. Migration 0009 preserves existing balances, introduces purchase lots and FIFO allocations, and supplies transactional expiry/refund triggers. New Worker code displays expiry dates and schedules reminders. Grant writes are atomic, settlement guards use unique IDs, and webhook claims occur immediately before delivery.
+
+**Next release:** apply migration 0009 and deploy the Worker together; verify the account page, scheduled job, both Stripe packs in sandbox and one live purchase. Old deployment notes below are historical evidence and contain superseded requirements. No production changes were made during this code review.
+
 # Legal pages rewritten (16 September 2026)
 
 - /terms and /privacy rewritten plainly for the current product (Plus/Pro packs, free allowance, Google sign-in, Stripe, 30-day files, no scanning). /policy aliases /privacy. Operator name and country come from lib/legal.ts; contact set to the operator's email, so the DRAFT label is gone. Pricing numbers render from lib/rules.ts. Deployed.

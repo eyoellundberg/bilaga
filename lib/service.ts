@@ -1,3 +1,4 @@
+import { creditSummary, expireCredits } from './credits';
 import { json, fail, ApiError, bodyJson, boundedBody } from './http';
 import { accountRoutes, tokenOwner, cleanAccounts } from './accounts';
 import { recordEvent, eventRoutes, deliverPending, pruneEvents } from './events';
@@ -7,6 +8,7 @@ import { sha256 } from './hash';
 import { env } from 'cloudflare:workers';
 import {
   CURRENT_OFFER,
+  creditExpiry,
   describePacks,
   topUpPack,
   usd,
@@ -138,16 +140,17 @@ async function limitsFor(owner: string) {
 // Settle a priced transfer inside one D1 batch. Every statement is guarded by
 // the same condition, so either all of it applies or none of it does.
 async function settle(t: Transfer, payer: AccountIdentity) {
+  const settlementId = crypto.randomUUID();
   const now = Date.now(),
     fee = feeCents(t.price_cents),
     net = t.price_cents - fee;
   const paidMark = db()
     .prepare(
-      `UPDATE transfers SET paid_at=?,paid_by=? WHERE id=? AND paid_at IS NULL AND state='complete' AND expires_at>? AND price_cents=?
+      `UPDATE transfers SET paid_at=?,paid_by=?,settlement_id=? WHERE id=? AND paid_at IS NULL AND state='complete' AND expires_at>? AND price_cents=?
        AND (SELECT balance_cents FROM accounts WHERE id=? AND deleted_at IS NULL)>=? RETURNING id`,
     )
-    .bind(now, payer.id, t.id, now, t.price_cents, payer.id, t.price_cents);
-  const guard = `EXISTS(SELECT 1 FROM transfers WHERE id='${t.id}' AND paid_by='${payer.id}' AND paid_at=${now})`;
+    .bind(now, payer.id, settlementId, t.id, now, t.price_cents, payer.id, t.price_cents);
+  const guard = `EXISTS(SELECT 1 FROM transfers WHERE id='${t.id}' AND settlement_id='${settlementId}')`;
   const row = (kind: string, account: string, delta: number, note: string | null) =>
     db()
       .prepare(
@@ -555,35 +558,38 @@ export async function handleApi(req: Request) {
       const raw = new TextDecoder().decode(await boundedBody(req, 65_536));
       if (!(await verifyStripeSignature(req.headers.get('Stripe-Signature'), raw)))
         return fail(400, 'bad_signature', 'Invalid Stripe signature.');
-      let event: { type?: string; data?: { object?: { id?: string; payment_status?: string; amount_total?: number; currency?: string; metadata?: { account_id?: string; offer?: string } } } };
+      let event: { created?: number; type?: string; data?: { object?: { id?: string; payment_status?: string; amount_total?: number; currency?: string; metadata?: { account_id?: string; offer?: string } } } };
       try {
         event = JSON.parse(raw);
       } catch {
         return fail(400, 'invalid_json', 'Send a JSON object.');
       }
-      const session = event.data?.object;
-      if (event.type !== 'checkout.session.completed' || !session?.id) return json({ received: true, ignored: event.type });
+      const session = event?.data?.object;
+      if (event?.type !== 'checkout.session.completed' || !session?.id) return json({ received: true, ignored: event?.type });
       const accountId = session.metadata?.account_id || '';
       const amount = session.amount_total ?? 0;
       if (session.payment_status !== 'paid' || session.currency !== 'usd' || !/^[a-f0-9]{32}$/.test(accountId) || !Number.isInteger(amount) || amount <= 0)
         return json({ received: true, ignored: 'unpaid_or_malformed' });
       // Sessions from the current offer credit their pack; older sessions
       // retain their original dollar-for-dollar credit.
-      const current = session.metadata?.offer === CURRENT_OFFER;
+      const offer = session.metadata?.offer;
+      if (offer && offer !== CURRENT_OFFER)
+        return fail(400, 'invalid_offer', 'Unknown top-up offer.');
+      const current = offer === CURRENT_OFFER;
       const pack = current ? topUpPack(amount) : undefined;
       if (current && !pack) return fail(400, 'invalid_pack', 'Unknown top-up pack.');
       const credit = pack?.credit_cents ?? amount;
       // Idempotent on the session id: replayed webhooks credit nothing.
       const ledgerId = `stripe_${session.id}`.slice(0, 200);
-      const now = Date.now();
+      const now = Number.isSafeInteger(event.created) && event.created! > 0 ? event.created! * 1000 : Date.now();
       const results = await db().batch([
         db()
           .prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM ledger WHERE id=?)`)
           .bind(credit, accountId, ledgerId),
         db()
-          .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
-            SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'purchase',NULL,?,? WHERE NOT EXISTS(SELECT 1 FROM ledger WHERE id=?) AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)`)
-          .bind(ledgerId, accountId, credit, accountId, `Card top-up${pack ? ` (${pack.name})` : ''}: paid ${usd(amount)} for ${usd(credit)} of credit`, now, ledgerId, accountId),
+          .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at,expires_at,paid_cents)
+            SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'purchase',NULL,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM ledger WHERE id=?) AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)`)
+          .bind(ledgerId, accountId, credit, accountId, `Card top-up${pack ? ` (${pack.name})` : ''}: paid ${usd(amount)} for ${usd(credit)} of credit`, now, current ? creditExpiry(now) : null, amount, ledgerId, accountId),
       ]);
       return json({ received: true, credited: results[1].meta.changes > 0 });
     }
@@ -660,6 +666,7 @@ export async function handleApi(req: Request) {
       return await download(req, p[1]);
     const owner = await authorize(req);
     await rateLimit(`owner:${owner}`, 300);
+    if (owner.length !== 64) await expireCredits(owner);
     // Until card top-ups exist, the operator token grants credit by email.
     if (p.length === 1 && p[0] === 'credits' && method === 'POST') {
       if (owner !== bindings().BILAGA_TOKEN_HASH)
@@ -670,24 +677,21 @@ export async function handleApi(req: Request) {
       if (!EMAIL.test(email) || !Number.isInteger(cents) || cents <= 0 || cents > 10_000_000)
         return fail(400, 'invalid_grant', 'Send an email and a positive integer number of cents.');
       const now = Date.now();
-      const account = await db()
-        .prepare('UPDATE accounts SET balance_cents=balance_cents+? WHERE email=? AND deleted_at IS NULL RETURNING id,balance_cents,handle')
-        .bind(cents, email)
-        .first<{ id: string; balance_cents: number; handle: string }>();
+      const results = await db().batch([
+        db().prepare('UPDATE accounts SET balance_cents=balance_cents+? WHERE email=? AND deleted_at IS NULL RETURNING id,balance_cents,handle')
+          .bind(cents, email),
+        db().prepare(`INSERT INTO ledger(id,account_id,delta_cents,balance_after,kind,note,created_at)
+          SELECT ?,id,?,balance_cents,'grant',?,? FROM accounts WHERE email=? AND deleted_at IS NULL`)
+          .bind(crypto.randomUUID(), cents, typeof body.note === 'string' ? body.note.slice(0,120) : null, now, email),
+      ]);
+      const account = results[0].results[0] as { id: string; balance_cents: number; handle: string } | undefined;
       if (!account) return fail(404, 'not_found', 'No account has that email.');
-      await db()
-        .prepare('INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at) VALUES (?,?,?,?,?,NULL,?,?)')
-        .bind(crypto.randomUUID().replaceAll('-', ''), account.id, cents, account.balance_cents, 'grant', typeof body.note === 'string' ? body.note.slice(0, 120) : null, now)
-        .run();
       return json({ account: account.handle, balance_cents: account.balance_cents });
     }
     if (p.length === 1 && p[0] === 'balance' && method === 'GET') {
       const me = await accountIdentity(owner);
       if (!me) return fail(403, 'account_required', 'Balances need an account token.');
-      const balance = await db()
-        .prepare('SELECT balance_cents FROM accounts WHERE id=?')
-        .bind(me.id)
-        .first<{ balance_cents: number }>();
+      const credits = await creditSummary(me.id);
       const rows = (
         await db()
           .prepare('SELECT delta_cents,balance_after,kind,transfer_id,note,created_at FROM ledger WHERE account_id=? ORDER BY created_at DESC LIMIT 50')
@@ -696,7 +700,7 @@ export async function handleApi(req: Request) {
       ).results;
       return json({
         account: me.handle,
-        balance_cents: balance?.balance_cents ?? 0,
+        ...credits,
         currency: 'USD',
         top_ups: stripeConfigured()
           ? `Add credit at /account. ${describePacks()}`
@@ -874,18 +878,26 @@ export async function handleApi(req: Request) {
             );
         }
       }
+      // Recheck free eligibility in the reservation: concurrent requests may
+      // have consumed it since the quote. A rejected request can retry for a paid quote.
       // Reserve quota, the charge, and the record atomically BEFORE allocating any storage.
       const results = await db().batch([
         db()
           .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,price_cents,charged_cents,state,created_at,expires_at)
       SELECT ?,?,?,?,?,?,?,?,?,?,'initializing',?,? WHERE
       (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL AND balance_cents>=?)) AND
+      (length(?)=64 OR ?>0 OR (
+        (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND state<>'deleted') < ? AND
+        COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ?
+      )) AND
       (SELECT count(*) FROM transfers WHERE owner=? AND state IN ('initializing','uploading','completing') AND purged_at IS NULL) < ? AND
       COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ? RETURNING id`)
           .bind(
             id, publicId, owner, filename, body.size_bytes, body.sender || null, recipient, inReplyTo, price, charge,
             now, now + DAY,
             owner, owner, charge,
+            owner, charge, owner, now - MONTH, limits.free_transfers_per_30_days,
+            owner, body.size_bytes, limits.free_stored_bytes,
             owner, limits.max_pending_uploads,
             owner, body.size_bytes, limits.max_stored_bytes,
           ),
@@ -1146,6 +1158,8 @@ export async function handleApi(req: Request) {
         );
       return response;
     }
+    if (String(e).includes('insufficient_credit'))
+      return json({ error: { code: 'insufficient_balance', message: 'Your available credit changed or expired. Refresh your balance and retry.' } }, 402);
     console.error(
       'Bilaga API request failed',
       e instanceof Error ? e.name : 'unknown',

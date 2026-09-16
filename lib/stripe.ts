@@ -1,3 +1,4 @@
+import { verifySignature } from './stripe-signature';
 import { env } from 'cloudflare:workers';
 import { fail } from './http';
 import { CREDIT_VALIDITY_YEARS, CURRENT_OFFER, choosePackMessage, topUpPack, usd } from './rules';
@@ -45,23 +46,6 @@ export async function createCheckout(accountId: string, amountCents: number, ori
   }
   return { id: data.id!, url: data.url };
 }
-const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
-// Stripe-Signature: t=<unix>,v1=<hmac-sha256(secret, `${t}.${body}`)>[,v1=...]
-export async function verifyStripeSignature(header: string | null, body: string, toleranceMs = 5 * 60_000) {
-  const secret = settings().STRIPE_WEBHOOK_SECRET;
-  if (!secret || !header) return false;
-  const parts = Object.fromEntries(
-    header.split(',').map((kv) => kv.trim().split('=') as [string, string]),
-  );
-  const t = parts.t;
-  const sigs = header.split(',').map((kv) => kv.trim()).filter((kv) => kv.startsWith('v1=')).map((kv) => kv.slice(3));
-  if (!t || !sigs.length || Math.abs(Date.now() - Number(t) * 1000) > toleranceMs) return false;
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const expected = hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${t}.${body}`)));
-  return sigs.some((s) => s.length === expected.length && timingSafeEqual(s, expected));
-}
-function timingSafeEqual(a: string, b: string) {
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
+export function verifyStripeSignature(header: string | null, body: string) {
+  return verifySignature(settings().STRIPE_WEBHOOK_SECRET, header, body);
 }

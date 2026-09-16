@@ -32,6 +32,7 @@ export const transfers = sqliteTable(
     priceCents: integer('price_cents').notNull().default(0),
     paidAt: integer('paid_at'),
     paidBy: text('paid_by'),
+    settlementId: text('settlement_id'),
     receiptRequests: integer('receipt_requests').notNull().default(0),
     chargedCents: integer('charged_cents').notNull().default(0),
   },
@@ -152,6 +153,9 @@ export const ledger = sqliteTable(
     id: text('id').primaryKey(),
     accountId: text('account_id').notNull(),
     deltaCents: integer('delta_cents').notNull(),
+    expiresAt: integer('expires_at'),
+    paidCents: integer('paid_cents'),
+    creditLotId: text('credit_lot_id'),
     balanceAfter: integer('balance_after').notNull(),
     kind: text('kind').notNull(),
     transferId: text('transfer_id'),
@@ -166,3 +170,21 @@ export const waitlist = sqliteTable('waitlist', {
   email: text('email').primaryKey(),
   createdAt: integer('created_at').notNull(),
 });
+
+// Lots preserve purchase terms; allocations make upload refunds reversible.
+export const creditLots = sqliteTable('credit_lots', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull(),
+  source: text('source').notNull(),
+  originalCents: integer('original_cents').notNull(),
+  remainingCents: integer('remaining_cents').notNull(),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at'),
+  reminderSentAt: integer('reminder_sent_at'),
+  reminderLeaseUntil: integer('reminder_lease_until').notNull().default(0),
+}, (t) => [index('idx_credit_lots_account').on(t.accountId, t.createdAt), index('idx_credit_lots_expiry').on(t.expiresAt)]);
+export const creditAllocations = sqliteTable('credit_allocations', {
+  ledgerId: text('ledger_id').notNull(),
+  lotId: text('lot_id').notNull(),
+  cents: integer('cents').notNull(),
+}, (t) => [primaryKey({ columns: [t.ledgerId, t.lotId] })]);

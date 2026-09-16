@@ -1,3 +1,4 @@
+import { creditSummary } from './credits';
 import { env } from 'cloudflare:workers';
 import { sha256 } from './hash';
 import { bodyJson, fail, json } from './http';
@@ -356,28 +357,17 @@ export async function accountRoutes(
   const account = await session(req);
   await limit(`account:${account.id}`, 60);
   if (route === 'account' && method === 'GET') {
-    const tokens = (
-      await db()
-        .prepare(
-          'SELECT id,label,created_at FROM api_tokens WHERE account_id=? ORDER BY created_at DESC',
-        )
-        .bind(account.id)
-        .all()
-    ).results;
-    const hook = await db()
-      .prepare('SELECT url FROM webhooks WHERE account_id=?')
-      .bind(account.id)
-      .first<{ url: string }>();
-    const totals = await db()
-      .prepare('SELECT COALESCE(SUM(download_requests),0) AS downloads, COALESCE(SUM(receipt_requests),0) AS receipts FROM transfers WHERE owner=?')
-      .bind(account.id)
-      .first<{ downloads: number; receipts: number }>();
-    const inbox = await db()
-      .prepare(
-        "SELECT count(*) AS n FROM transfers WHERE recipient=? AND state='complete' AND expires_at>?",
-      )
-      .bind(account.email, Date.now())
-      .first<{ n: number }>();
+    const [tokens, hook, totals, inbox, credits] = await Promise.all([
+      db().prepare('SELECT id,label,created_at FROM api_tokens WHERE account_id=? ORDER BY created_at DESC')
+        .bind(account.id).all().then((result) => result.results),
+      db().prepare('SELECT url FROM webhooks WHERE account_id=?')
+        .bind(account.id).first<{ url: string }>(),
+      db().prepare('SELECT COALESCE(SUM(download_requests),0) AS downloads, COALESCE(SUM(receipt_requests),0) AS receipts FROM transfers WHERE owner=?')
+        .bind(account.id).first<{ downloads: number; receipts: number }>(),
+      db().prepare("SELECT count(*) AS n FROM transfers WHERE recipient=? AND state='complete' AND expires_at>?")
+        .bind(account.email, Date.now()).first<{ n: number }>(),
+      creditSummary(account.id),
+    ]);
     return json({
       email: account.email,
       handle: account.handle,
@@ -385,7 +375,7 @@ export async function accountRoutes(
       download_requests_total: totals?.downloads ?? 0,
       receipt_requests_total: totals?.receipts ?? 0,
       webhook_url: hook?.url ?? null,
-      balance_cents: account.balance_cents,
+      ...credits,
       last_login_method: account.last_login_method,
       limits: describeLimits(),
       top_ups: stripeConfigured() ? 'stripe_checkout' : 'unavailable',

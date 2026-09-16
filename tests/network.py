@@ -7,6 +7,9 @@ checks = 0
 def sql(query):
     result = subprocess.run(['npx','wrangler','d1','execute','DB','--local','--config','wrangler.cloudflare.json','--persist-to','.wrangler/state','--command',query,'--json'], check=True, capture_output=True, text=True, env=dict(os.environ, WRANGLER_LOG_PATH='.wrangler/logs'))
     return json.loads(result.stdout)[0]['results']
+def set_balance(email, cents):
+    # Test fixture resets must keep the lot model and aggregate balance aligned.
+    sql(f"DELETE FROM credit_lots WHERE account_id=(SELECT id FROM accounts WHERE email='{email}'); UPDATE accounts SET balance_cents={cents} WHERE email='{email}'; INSERT INTO credit_lots(id,account_id,source,original_cents,remaining_cents,created_at) SELECT 'fixture-'||id,id,'grant',{cents},{cents},0 FROM accounts WHERE email='{email}'")
 def digest(value): return hashlib.sha256(value.encode()).hexdigest()
 def call(path, method='GET', body=None, cookie='', expect=200):
     global checks; checks += 1
@@ -48,6 +51,25 @@ a_acct,_ = call('account',cookie=a); b_acct,_ = call('account',cookie=b)
 assert a_acct['handle'].startswith('acct_') and a_acct['handle']!=b_acct['handle'] and a_acct['webhook_url'] is None
 ta = call('account/tokens','POST',{'label':'A agent'},cookie=a,expect=201)[0]['token']
 tb = call('account/tokens','POST',{'label':'B agent'},cookie=b,expect=201)[0]['token']
+
+# Concurrent reservations cannot both claim 3 GB from a 5 GB free allowance.
+from concurrent.futures import ThreadPoolExecutor
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+barrier = threading.Barrier(2)
+def reserve_free(_):
+    barrier.wait()
+    req = Request(BASE+'/api/transfers', data=json.dumps({'filename':'race.bin','size_bytes':3_000_000_000}).encode(), headers={'Authorization':'Bearer '+ta,'Content-Type':'application/json'})
+    try:
+        with urlopen(req) as response: return response.status, json.loads(response.read())
+    except HTTPError as error: return error.code, json.loads(error.read())
+with ThreadPoolExecutor(max_workers=2) as pool:
+    reservations = list(pool.map(reserve_free, range(2)))
+assert sum(status == 201 for status, _ in reservations) == 1, reservations
+assert all(status in (201,402,429) for status, _ in reservations), reservations
+for status, transfer in reservations:
+    if status == 201: bearer(ta,'transfers/'+transfer['id'],'DELETE')
+assert bearer(ta,'balance')['balance_cents'] == 0
 
 # Webhook registration: https-only for public hosts, loopback allowed locally, owner token refused.
 request('/api/webhook','PUT',{'url':'http://127.0.0.1:3120/hook'},expect=403)
@@ -136,10 +158,21 @@ page,_=request('/t/'+ppid,auth=False); assert b'2.50' in page
 entry=[t for t in bearer(tb,'inbox')['transfers'] if t['public_id']==ppid][0]; assert entry['pay_url'] and entry['paid'] is False
 bearer(ta,'inbox/'+ppid+'/pay','POST',expect=404)
 bearer(tb,'inbox/'+pid+'/pay','POST',expect=409)
-sql(f"UPDATE accounts SET balance_cents=100 WHERE email='{b_email}'")
+set_balance(b_email, 100)
 bearer(tb,'inbox/'+ppid+'/pay','POST',expect=402)
-sql(f"UPDATE accounts SET balance_cents=300 WHERE email='{b_email}'")
-paid = bearer(tb,'inbox/'+ppid+'/pay','POST'); assert paid['paid'] is True and paid['paid_at'] and paid['received_at'] and paid['pay_url'] is None
+set_balance(b_email, 300)
+def pay_concurrently(_):
+    try: return bearer(tb,'inbox/'+ppid+'/pay','POST')
+    except AssertionError as error:
+        assert error.args[0][1] in (402,409), error
+        return None
+with ThreadPoolExecutor(max_workers=8) as pool:
+    payments=[p for p in pool.map(pay_concurrently, range(8)) if p]
+assert payments
+paid=payments[0]
+assert all(p['paid'] and p['paid_at']==paid['paid_at'] for p in payments)
+assert paid['received_at'] and paid['pay_url'] is None
+assert sql(f"SELECT COUNT(*) AS n FROM ledger WHERE transfer_id='{priced['id']}' AND kind='payment'")[0]['n']==1
 assert bearer(tb,'inbox/'+ppid+'/pay','POST')['paid_at']==paid['paid_at']
 body,_=request('/api/download/'+ppid,auth=False); assert body==b'secret'
 bal_b = bearer(tb,'balance'); bal_a = bearer(ta,'balance')
@@ -153,10 +186,10 @@ assert [e['event']['type'] for e in bearer(tb,'events?type=transfer.paid')['even
 bearer(ta,'transfers/'+priced['id'],'DELETE')
 
 # Free allowance, then charges: past the free storage a transfer costs the storage price, is refunded if abandoned, and kept if completed.
-sql(f"UPDATE accounts SET balance_cents=0 WHERE email='{b_email}'")
+set_balance(b_email, 0)
 big = bearer(tb,'transfers','POST',{'filename':'big.bin','size_bytes':5_000_000_001},expect=402)
 assert big['error']['code']=='insufficient_balance' and '0.51' in big['error']['message']
-sql(f"UPDATE accounts SET balance_cents=100 WHERE email='{b_email}'")
+set_balance(b_email, 100)
 big = bearer(tb,'transfers','POST',{'filename':'big.bin','size_bytes':5_000_000_001},expect=201)
 assert big['charged_usd']==0.51 and big['billing']=='balance' and bearer(tb,'balance')['balance_cents']==49
 bearer(tb,'transfers/'+big['id'],'DELETE')

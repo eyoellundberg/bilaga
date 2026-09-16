@@ -111,28 +111,25 @@ async function deliverOne(row: EventRow, url: string) {
   const next = ok || attempts > RETRY_DELAYS.length ? null : now + RETRY_DELAYS[attempts - 1];
   await db()
     .prepare(
-      'UPDATE events SET attempts=?,last_status=?,delivered_at=?,next_attempt_at=? WHERE id=? AND attempts=?',
+      'UPDATE events SET attempts=?,last_status=?,delivered_at=?,next_attempt_at=? WHERE id=? AND attempts=? AND next_attempt_at IS ?',
     )
-    .bind(attempts, status, ok ? now : null, next, row.id, row.attempts)
+    .bind(attempts, status, ok ? now : null, next, row.id, row.attempts, row.next_attempt_at)
     .run();
   return ok;
 }
 // Bounded drain. Claims rows by advancing next_attempt_at so overlapping drains
 // (request tail plus scheduled job) do not double-deliver.
 export async function deliverPending(limit = 10) {
-  const now = Date.now();
-  const rows = (
-    await db()
-      .prepare(
-        `UPDATE events SET next_attempt_at=? WHERE id IN (
-           SELECT id FROM events WHERE delivered_at IS NULL AND next_attempt_at IS NOT NULL AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT ?
-         ) RETURNING *`,
-      )
-      .bind(now + 60_000, now, limit)
-      .all<EventRow>()
-  ).results;
   let delivered = 0;
-  for (const row of rows) {
+  for (let i = 0; i < limit; i++) {
+    const now = Date.now();
+    // Claim one row just before delivery, so queued requests never age out
+    // while waiting behind a slow destination.
+    const row = await db().prepare(`UPDATE events SET next_attempt_at=? WHERE id=(
+      SELECT id FROM events WHERE delivered_at IS NULL AND next_attempt_at IS NOT NULL AND next_attempt_at<=?
+      ORDER BY next_attempt_at LIMIT 1
+    ) RETURNING *`).bind(now + 60_000, now).first<EventRow>();
+    if (!row) break;
     const hook = await db()
       .prepare('SELECT url FROM webhooks WHERE account_id=?')
       .bind(row.account_id)

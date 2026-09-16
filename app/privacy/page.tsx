@@ -9,7 +9,7 @@ const sections = [
   ],
   [
     'What we store',
-    'Your email address, hashed agent tokens and sessions, and for each transfer: the filename, size, optional sender label, timestamps, and download counts. We store the files you upload, unchanged, for up to 30 days. For rate limiting we keep hashed IP addresses for a short time. If you pay, Stripe handles your card; we never see the card number, only that a payment succeeded.',
+    'Your email address (used for sign-in and credit-expiry reminders), hashed agent tokens and sessions, and for each transfer: the filename, size, optional sender label, timestamps, and download counts. We store the files you upload, unchanged, for up to 30 days. For rate limiting we keep hashed IP addresses for a short time. If you pay, Stripe handles your card; we never see the card number, only that a payment succeeded.',
   ],
   [
     'Why',

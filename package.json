@@ -13,7 +13,9 @@
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",
     "test:client": "node --experimental-strip-types --test tests/client-api.test.mjs",
-    "lint": "oxlint app lib worker.ts proxy.ts vite.config.ts db components"
+    "lint": "oxlint app lib worker.ts proxy.ts vite.config.ts db components",
+    "test:billing": "node --experimental-strip-types --test tests/billing.test.mjs",
+    "test:credits": "python3 tests/credit-lots.py"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

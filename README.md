@@ -12,7 +12,7 @@ Every completed transfer stores a content hash (SHA-256 over the ordered raw SHA
 
 Transfers can be addressed with `to` (an email) and chained with `in_reply_to`. GET /api/inbox lists transfers addressed to the token's account email; downloading with a bearer token or POST /api/inbox/{public_id}/received records `received_at` and `received_by`, which the signed receipt exposes as `recipient_account` alongside `sender_account` (stable `acct_…` handles, never emails). Every account has a 30-day event log at GET /api/events (`transfer.completed`, `transfer.downloaded` on first download, `transfer.received`, `transfer.reply`, `transfer.deleted`), each entry signed with the receipt key. PUT /api/webhook registers one https URL per account; deliveries are pushed after the triggering request via waitUntil, retried on a 1m/5m/30m/2h/12h schedule, and swept by the scheduled job. Loopback http webhooks are allowed only when the API itself runs on loopback. Migration 0005 adds handles, addressing columns, `webhooks`, and `events`.
 
-Downloads stream with ranges and attachment headers. Anyone holding a valid link can download. Files are not malware-scanned or end-to-end encrypted. Download GET requests are counted, including ranges; counts do not prove completed downloads or unique people. The agent reports delivery; Bilaga sends login emails only, not recipient delivery messages.
+Downloads stream with ranges and attachment headers. Anyone holding a valid link can download. Files are not malware-scanned or end-to-end encrypted. Download GET requests are counted, including ranges; counts do not prove completed downloads or unique people. The agent reports delivery; Bilaga sends login and credit-expiry reminder emails, not recipient delivery messages.
 
 Priced transfers: `price_cents` on creation (requires `to` and an account). Downloads return 402 until the recipient pays via POST /api/inbox/{public_id}/pay, which settles in one D1 batch: mark paid, debit payer, credit seller minus FEE_BPS (500), ledger rows for payer, seller, and the `bilaga` fee account. Balances are integer cents on accounts; GET /api/balance shows the ledger; POST /api/credits (owner token) grants credit by email. Stripe top-ups are implemented; storage is not charged separately. The public verification spec is at /verify; /api/receipt-key advertises `spec_url` and `retired_key_ids`.
 
@@ -32,6 +32,8 @@ Local email is simulated, so it proves binding invocation rather than inbox deli
 
 ```sh
 npm run test:client
+npm run test:billing
+npm run test:credits
 npm run lint
 npx tsc --noEmit
 BILAGA_TEST_SCHEDULED=1 python3 tests/integration.py
@@ -70,6 +72,10 @@ MIT. See [LICENSE](LICENSE).
 
 No subscription. $15 buys $15 credit (up to 150 GB); $30 buys $40 credit (up to 400 GB), a 25% lower price per GB. Both share the same features and limits. Paid uploads consume $0.10 credit per decimal GB, rounded up to a cent, with a $0.25 minimum; small transfers can reduce total capacity. GB figures refer to cumulative paid uploads, not simultaneous storage. Download availability remains 30 days and signed receipts remain permanent.
 
-Purchased credits have a three-year validity policy. Per-purchase expiry enforcement, oldest-first spending, expiry display, and reminder emails are **not implemented** and must be completed before this offer is activated for live payments. Existing balances must not be retroactively expired. The current ledger holds aggregate credit, not cash: the larger pack includes $10 promotional credit. Experimental priced-transfer settlement currently uses that same balance; isolate promotional transfer credit before enabling any cash payout or treating it as seller proceeds.
+New pack purchases now have per-purchase three-year expiry, FIFO spending, account/API expiry display, and scheduled email reminders 30 days before expiry. Migration `0009_credit_lots.sql` preserves all existing balances as non-expiring legacy credit. Paid and promotional amounts are separate lots; allocations retain their source through spending and unfinished-upload refunds. Refunds preserve original expiry dates and do not restore portions that have already expired. Grants and pre-migration refunds are non-expiring.
+
+The migration includes custom SQLite triggers, which must be retained: ledger writes allocate or restore lots in the same transaction as balance changes. Do not change account balances directly. `/api/account` and `/api/balance` expose `credit_lots` with remaining cents, source, purchase time and expiry. The scheduler expires unused lots and sends bounded, retryable reminder emails; request-time validation also rejects expired credit. Reminder email is at-least-once if a process dies after sending but before recording success. Experimental priced transfers still have no cash payout; allocation records preserve source provenance, not withdrawable cash balances.
+
+These changes are local until migration 0009 and the new Worker are deployed together. Stop older Worker versions from writing balances after migration. Reverting only the Worker after new expiring purchases is unsafe: old code does not enforce expiry.
 
 Checkout uses server-owned `packs_2026_09` offer metadata. The signed webhook derives credit from the paid amount and the versioned offer, not a client-supplied bonus. Legacy sessions keep dollar-for-dollar credit; session-id idempotency remains in place. Validate both new packs in Stripe sandbox before live activation.

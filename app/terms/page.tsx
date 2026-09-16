@@ -29,7 +29,7 @@ const sections = [
   ],
   [
     'What it costs',
-    `Every account gets ${FREE_MONTHLY_TRANSFERS} transfers per rolling 30 days and ${gbLabel(FREE_STORED_BYTES)} stored, free. Beyond that, a transfer costs ${usd(PRICE_CENTS_PER_GB)} of credit per decimal GB, with a ${usd(MINIMUM_CHARGE_CENTS)} minimum, charged when the transfer is created and refunded if the upload never completes. Credit is bought once by card: ${packs}. Credit is valid for ${CREDIT_VALIDITY_YEARS} years, is not refundable or withdrawable, and is lost if you delete your account. There is no subscription and nothing renews. Files up to ${gbLabel(MAX_BYTES)}.`,
+    `Every account gets ${FREE_MONTHLY_TRANSFERS} transfers per rolling 30 days and ${gbLabel(FREE_STORED_BYTES)} stored, free. Beyond that, a transfer costs ${usd(PRICE_CENTS_PER_GB)} of credit per decimal GB, with a ${usd(MINIMUM_CHARGE_CENTS)} minimum, charged when the transfer is created and refunded if the upload never completes. Credit is bought once by card: ${packs}. Credit is valid for ${CREDIT_VALIDITY_YEARS} years, is not refundable or withdrawable, and is lost if you delete your account. Oldest credit is used first. Upload refunds keep the original expiry date and do not restore expired portions. We show expiry dates in your account and email a reminder 30 days before unused credit expires. Existing credit retains its previous terms. There is no subscription and nothing renews. Files up to ${gbLabel(MAX_BYTES)}.`,
   ],
   [
     'What you may not do',

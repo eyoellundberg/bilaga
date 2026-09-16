@@ -46,11 +46,13 @@ email=account['email']
 assert account['limits']['retention_days']==30 and account['limits']['free_stored_bytes']==5_000_000_000 and account['balance_cents']==0 and account['last_login_method']=='email'
 # Card top-ups: refused amounts, unavailable without a Stripe key; the webhook credits once per session id and rejects bad signatures.
 call('account/topup','POST',{'amount_cents':999},cookie=a,expect=400)
-if account['top_ups']=='unavailable': call('account/topup','POST',{'amount_cents':1000},cookie=a,expect=503)
+if account['top_ups']=='unavailable': call('account/topup','POST',{'amount_cents':1500},cookie=a,expect=503)
 import hmac
 acct_id=sql(f"SELECT id FROM accounts WHERE email='{email}'")[0]['id']
-def stripe_event(session_id,amount=1500,status='paid',secret='whsec_localtest',ts=None):
+def stripe_event(session_id,amount=1500,status='paid',secret='whsec_localtest',ts=None,offer=None):
     body=json.dumps({'type':'checkout.session.completed','data':{'object':{'id':session_id,'payment_status':status,'amount_total':amount,'currency':'usd','metadata':{'account_id':acct_id}}}})
+    if offer is not None:
+        event=json.loads(body); event['data']['object']['metadata']['offer']=offer; body=json.dumps(event)
     ts=ts or int(time.time()); sig=hmac.new(secret.encode(),f'{ts}.{body}'.encode(),'sha256').hexdigest()
     return body.encode(),{'Stripe-Signature':f't={ts},v1={sig}','Content-Type':'application/json'}
 body,h=stripe_event('cs_test_1'); request('/api/stripe/webhook','POST',body,auth=False,headers=h)
@@ -60,7 +62,35 @@ body,h=stripe_event('cs_test_3',ts=int(time.time())-3600); request('/api/stripe/
 body,h=stripe_event('cs_test_4',status='unpaid'); request('/api/stripe/webhook','POST',body,auth=False,headers=h)
 assert call('account',cookie=a)[0]['balance_cents']==1500
 assert sql(f"SELECT kind,delta_cents FROM ledger WHERE account_id='{acct_id}'")==[{'kind':'purchase','delta_cents':1500}]
-sql(f"UPDATE accounts SET balance_cents=0 WHERE id='{acct_id}'"); sql(f"DELETE FROM ledger WHERE account_id='{acct_id}'")
+for sid,amount in [('cs_plus',1500),('cs_pro',3000)]:
+    body,h=stripe_event(sid,amount=amount,offer='packs_2026_09')
+    request('/api/stripe/webhook','POST',body,auth=False,headers=h)
+    replay,_=request('/api/stripe/webhook','POST',body,auth=False,headers=h)
+    assert replay['credited'] is False
+assert call('account',cookie=a)[0]['balance_cents']==7000
+for sid,amount,offer in [('cs_badpack',1000,'packs_2026_09'),('cs_badoffer',1500,'unknown')]:
+    body,h=stripe_event(sid,amount=amount,offer=offer)
+    request('/api/stripe/webhook','POST',body,auth=False,headers=h,expect=400)
+assert call('account',cookie=a)[0]['balance_cents']==7000
+credits=call('account',cookie=a)[0]['credit_lots']
+assert sum(lot['remaining_cents'] for lot in credits)==7000
+assert sum(lot['remaining_cents'] for lot in credits if lot['source']=='promotion')==1000
+assert sum(lot['remaining_cents'] for lot in credits if lot['expires_at'] is None)==1500
+# Local scheduled reminders are simulated and marked once; due lots expire on read.
+plus=next(lot for lot in credits if lot['id']=='stripe_cs_plus_paid')
+assert plus['expires_at'] > int(time.time()*1000)+1000*86400*1000
+sql(f"UPDATE credit_lots SET expires_at={int(time.time()*1000)+10*86400*1000} WHERE account_id='{acct_id}' AND expires_at IS NOT NULL")
+request('/cdn-cgi/handler/scheduled',auth=False)
+reminded=sql(f"SELECT reminder_sent_at FROM credit_lots WHERE id='{plus['id']}'")[0]['reminder_sent_at']
+assert reminded
+assert sql(f"SELECT COUNT(DISTINCT reminder_sent_at) AS n,COUNT(*) AS lots FROM credit_lots WHERE account_id='{acct_id}' AND expires_at IS NOT NULL")[0]=={'n':1,'lots':3}
+request('/cdn-cgi/handler/scheduled',auth=False)
+assert sql(f"SELECT reminder_sent_at FROM credit_lots WHERE id='{plus['id']}'")[0]['reminder_sent_at']==reminded
+sql(f"UPDATE credit_lots SET expires_at=1 WHERE id='{plus['id']}'")
+assert call('account',cookie=a)[0]['balance_cents']==5500
+assert call('account',cookie=a)[0]['balance_cents']==5500
+assert sql(f"SELECT COUNT(*) AS n FROM ledger WHERE id='expiry_{plus['id']}'")[0]['n']==1
+sql(f"DELETE FROM credit_lots WHERE account_id='{acct_id}'"); sql(f"UPDATE accounts SET balance_cents=0 WHERE id='{acct_id}'"); sql(f"DELETE FROM ledger WHERE account_id='{acct_id}'")
 token,_=call('account/tokens','POST',{'label':'Synthetic agent'},cookie=a,expect=201)
 assert 'token' in token
 rows=sql(f"SELECT hash FROM api_tokens WHERE id='{token['id']}'")

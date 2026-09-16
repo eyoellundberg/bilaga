@@ -1,3 +1,4 @@
+import { expireCredits, remindExpiringCredits } from './lib/credits';
 import handler from 'vinext/server/fetch-handler';
 import { cleanup, handleApi } from './lib/service';
 import { deliverPending } from './lib/events';
@@ -28,7 +29,8 @@ async function discardRejectedBody(request: Request) {
 const worker = {
   async fetch(...args: Parameters<typeof handler.fetch>) {
     const request = args[0];
-    const api = new URL(request.url).pathname.startsWith('/api/');
+    const url = new URL(request.url);
+    const api = url.pathname.startsWith('/api/');
     // Vinext middleware clones incoming bodies. Early rejection can cancel a
     // clone and abort workerd's connection. Dispatch explicit APIs directly,
     // retaining the same browser boundaries without cloning binary uploads.
@@ -61,13 +63,13 @@ const worker = {
         'Permissions-Policy',
         'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
       );
-      if (new URL(request.url).protocol === 'https:')
+      if (url.protocol === 'https:')
         response.headers.set('Strict-Transport-Security', 'max-age=31536000');
       // Consume a bounded rejected body without buffering it. Leaving even a
       // small body unread can cause the local workerd proxy to lose the reply.
       await discardRejectedBody(request);
       // Push webhook deliveries after the response; failures are retried later.
-      const pathname = new URL(request.url).pathname;
+      const pathname = url.pathname;
       if (
         api &&
         (!['GET', 'HEAD'].includes(request.method) ||
@@ -82,9 +84,11 @@ const worker = {
   },
   async scheduled() {
     // Bound each run. Failed deletions remain eligible for the next run.
+    await expireCredits();
+    const reminders = await remindExpiringCredits();
     const removed = await cleanup();
     const delivered = await deliverPending(25);
-    console.log(JSON.stringify({ event: 'scheduled_cleanup', removed, delivered }));
+    console.log(JSON.stringify({ event: 'scheduled_cleanup', removed, delivered, reminders }));
   },
 };
 
