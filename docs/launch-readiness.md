@@ -1,3 +1,7 @@
+# Launch-day copy, abuse policy and SEO — deployed 16 September 2026
+
+Worker version 048b038f deployed (commits ca2770a, b94f48c, 5a72879). Live checks after deploy: /, /docs, /terms, /privacy, /verify, /robots.txt, /sitemap.xml and /llms.txt all 200; the home page title is "Bilaga — Where large files get sent" with Open Graph, Twitter, canonical and SoftwareApplication JSON-LD present; /terms shows the "Abuse and takedowns" section; the llms.txt summary line carries the new copy. Lint, TypeScript and build passed locally before deploy. No migration was needed.
+
 # Abuse policy — 16 September 2026
 
 /terms gains an "Abuse and takedowns" section: files are unscanned, reports go by email to the operator contact with the link, the operator removes offending files, closes the sending account and replies to the reporter; the receipt stays, redacted. This closes the open policy item in "Missing before public enrollment". The 50 GB reliability run and the Google sign-in click-through were deliberately skipped for launch day at the co-founder's call; both remain listed as unverified in production. The revised Plus/Pro offer was already live before this change (/api/config reports both packs and 5 free transfers). The live $15 purchase is still the operator's to make.
