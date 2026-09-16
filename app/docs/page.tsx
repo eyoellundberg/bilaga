@@ -105,6 +105,13 @@ export default function Docs() {
         <ConnectAgent />
         <details className="agent-details">
           <summary>Technical setup and API reference</summary>
+          <h2>MCP</h2>
+          <p>
+            If your agent speaks the Model Context Protocol, the{' '}
+            <a href="/mcp">MCP server</a> is the shortest path:{' '}
+            <code>npx -y bilaga-mcp</code> with <code>BILAGA_TOKEN</code> set
+            gives it a <code>send_file</code> tool that returns the link.
+          </p>
           <h2>Start with a file</h2>
           <p>
             Use the{' '}

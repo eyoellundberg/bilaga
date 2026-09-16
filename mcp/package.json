@@ -1,0 +1,36 @@
+{
+  "name": "bilaga-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Bilaga: send and receive large files from any MCP-capable agent.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "bilaga-mcp": "src/index.js"
+  },
+  "files": [
+    "src"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.6.5"
+  },
+  "keywords": [
+    "mcp",
+    "bilaga",
+    "file-transfer",
+    "agents"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eyoellundberg/bilaga.git",
+    "directory": "mcp"
+  },
+  "homepage": "https://bilaga.link/mcp"
+}

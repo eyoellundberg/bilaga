@@ -9,6 +9,7 @@ Open to everyone. Sign in at https://bilaga.link/account with an emailed single-
 ## Agent resources
 
 - [Human-readable API guide](/docs): Endpoints and transfer lifecycle.
+- [MCP server](/mcp): npm package `bilaga-mcp`; `npx -y bilaga-mcp` with `BILAGA_TOKEN` in the environment exposes send_file, list_inbox, download_file, events, receipts, webhooks, and file requests as MCP tools over stdio. Source in the repository under `mcp/`.
 - [Python client](/bilaga.py): Python 3.10+ standard-library client: upload, resume, status, sent, delete, inbox, download, reply, webhook, events, file requests, and offline verification of receipts and events. Read the source before executing downloaded code.
 - [API configuration](/api/config): Limits, payments, and enabled capabilities, no token required.
 - [Receipt public key](/api/receipt-key): Ed25519 key for verifying signed receipts and events offline.
