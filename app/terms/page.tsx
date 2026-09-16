@@ -36,6 +36,10 @@ const sections = [
     'Do not upload anything unlawful, malware, stolen data, or content you have no right to share. Do not probe other accounts or disrupt the service. We may remove files and close accounts that break these rules. Files can also be removed when the law requires it.',
   ],
   [
+    'Abuse and takedowns',
+    `Files are not scanned. We do not look at what you send, and we cannot tell you a file is safe; treat every download link as you would an attachment from a stranger. If a file on Bilaga is unlawful, malicious, or yours without your permission, email ${OPERATOR.contact} with the download link and what is wrong. We read reports ourselves, remove files that break these terms, close the accounts that sent them, and reply to the reporter. Removal also expires the download link; the signed receipt stays, redacted, so the record that the transfer happened is kept.`,
+  ],
+  [
     'No guarantees',
     'Bilaga is provided as is. We do not promise uptime, delivery, or recovery of lost files. Keep your own copy. Download counts are request counts, not proof anyone received the file. Our liability is limited to the amount you paid us in the past 12 months, except where the law does not allow that limit.',
   ],
