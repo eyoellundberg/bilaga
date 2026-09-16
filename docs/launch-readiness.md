@@ -1,4 +1,6 @@
-# Multi-file requests — 16 September 2026 (local, not deployed)
+# Multi-file requests — deployed 16 September 2026
+
+Deployed as Worker version c8547872 (commit 4b42e7a) after migration `0010_file_requests.sql` was applied to production D1 with `d1 migrations apply --remote` (no trigger bodies, so the standard path worked; a first attempt hit a transient API 7403 and the retry succeeded). Verified live: `d1_migrations` ends at 0010, `file_requests` table and `transfers.request_id` present, `/`, `/docs`, `/llms.txt`, `/r/{id}` return 200, `/api/requests` returns 401 without a token, `/api/drop/{id}` returns 404 without a key. Before deploying, all local suites passed on a freshly restarted worker: requests 78, transfers 43, accounts 35, network 82, security, billing 4, client 5, lint and typecheck clean. No live end-to-end request submission has been made yet.
 
 General file requests are implemented. An account holder creates a scoped link, guests upload multiple files without signup, and Done freezes a signed submission manifest and queues one `request.submitted` event. Bilaga supplies files, hashes, submission time and an unverified uploader email; the requesting application owns acceptance criteria, payments and deadlines. Existing per-file billing is charged to the requester; Done adds no charge.
 
