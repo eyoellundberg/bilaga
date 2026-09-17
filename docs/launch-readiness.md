@@ -1,3 +1,20 @@
+# Brand refresh and Product Hunt launch prep — deployed 17 September 2026
+
+Worker version 8bc35729 (preceded the same day by 14ebef59). No migrations. Product Hunt launch is scheduled for 18 September 2026 (GPT-6 Astra Challenge), publishing 12:01 AM Pacific.
+
+- Brand: binder-clip logo (`public/logo.svg`, `BrandMark` in `app/brand.tsx`, new favicon), palette #024C17 / #ADEBB0 replacing the blues in `app/globals.css`, Faculty Glyphic headlines and Geist body text self-hosted through `@fontsource` packages (CSP `font-src 'self'` unchanged).
+- Tagline is now "File transfers for agents" everywhere (was "by agents"): home, metadata, JSON-LD, llms.txt, README, bilaga.md.
+- Open Graph: `public/og.png` (1200×636) with `summary_large_image`. The site had no share image before.
+- Home: plainer lede, new "How it works" section (create account, connect your agent, copyable agent message), CSS-only hamburger menu below 720 px on /, /terms, /privacy, footer link to x.com/bilagalink. CSP `img-src` allows api.producthunt.com for the badge.
+- Account: the agent section is titled "Connect your agent", open until the first token exists, and shows a Codex one-liner before the Claude Code one. The Codex command (`codex mcp add bilaga -- npx -y bilaga-mcp`) was NOT verified; Codex was not installed on the build machine.
+- Fixes: the notice on /r/{id} overlapped the headline (inline `output`); the receipt icon on /t/{id} sat on its own line.
+- Checks before deploy: lint, test:client, test:billing, test:credits, integration (43 checks) and security suites against the local built Worker. After deploy: /, /account, /docs, /mcp, /verify, /terms, /privacy, /og.png, /favicon.svg, /llms.txt, /api/config and a live /t/ page all 200; og:image and twitter:card present in the live HTML. Link-preview rendering on X/LinkedIn not yet checked.
+- One production transfer was created for launch screenshots (public id 35e84338d2f44acfbaac32d08219ae8f, a zip of the logo files, free allowance, expires 17 October). Do not delete it before the launch; gallery frame 3 shows its URL.
+- Gallery sources and a WebKit capture tool live in `../gallery/src` (`build.sh` regenerates the PNGs).
+- Design note for optional end-to-end encryption: `docs/e2e-encryption-design.md`. Not started.
+- Styling note: the site is TypeScript throughout, but styling is mostly hand-written CSS in `app/globals.css` with literal values; Tailwind is used only by the shadcn components. A migration to Tailwind utilities and theme tokens is a post-launch candidate, not a launch blocker.
+- Still open from before: login email lands in Gmail junk; R2 lifecycle rule for orphaned multipart uploads; monitoring.
+
 # MCP server — deployed 16 September 2026
 
 Update, later the same day: `bilaga-mcp` 0.2.0 published. `setup [TOKEN]` validates and stores the token in `~/.config/bilaga/token`; the account page shows a one-line install next to each new token; `get_account` removed because /api/account is session-only (llms.txt corrected). Worker version 143b2026-ae7d-4a53-8ae2-af2820c3ab33. Cold `npx -y bilaga-mcp@0.2.0 setup` from a cleaned npm cache rejected a bad token and accepted the owner token. A real account token exercised `get_balance` through the server; the other account tools remain untested with a real account.

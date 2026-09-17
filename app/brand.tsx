@@ -1,11 +1,29 @@
 // Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
 /* oxlint-disable next/no-html-link-for-pages */
-import { Paperclip } from 'lucide-react';
+export function BrandMark({ size = 27 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 880 880"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={56}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M146.667 806.667H261.963C275.562 806.667 281.107 794.464 283.675 781.627C289.322 753.394 311.61 733.333 337.334 733.333C363.058 733.333 385.345 753.394 390.992 781.627C393.558 794.464 399.106 806.667 412.706 806.667H467.295C480.895 806.667 486.442 794.464 489.009 781.627C494.656 753.394 516.942 733.333 542.667 733.333C568.392 733.333 590.678 753.394 596.325 781.627C598.892 794.464 604.439 806.667 618.039 806.667H733.334" />
+      <path d="M321.651 733.334C321.651 733.334 352.831 433.375 364.359 347.568C374.293 273.637 235.908 173.039 321.282 113.438C397.888 59.9594 482.104 59.9686 558.711 113.444C644.09 173.042 505.732 273.638 515.665 347.568C527.193 433.375 558.37 733.334 558.37 733.334" />
+      <path d="M183.333 806.667L134.841 629.321C110.52 525.18 98.359 473.11 125.229 438.222C152.1 403.333 204.366 403.333 308.898 403.333H571.102C675.635 403.333 727.899 403.333 754.772 438.222C781.642 473.11 769.479 525.18 745.158 629.321L696.667 806.667" />
+    </svg>
+  );
+}
 
 export function Brand() {
   return (
     <a className="brand" href="/" aria-label="Bilaga home">
-      <Paperclip size={27} />
+      <BrandMark />
       bilaga<span className="brand-dot">.</span>
     </a>
   );

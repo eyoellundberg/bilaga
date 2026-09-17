@@ -21,12 +21,15 @@ type Account = {
 };
 const setupCommand = (token: string) =>
   `npx -y bilaga-mcp setup ${token} && claude mcp add -s user bilaga -- npx -y bilaga-mcp`;
+const codexSetupCommand = (token: string) =>
+  `npx -y bilaga-mcp setup ${token} && codex mcp add bilaga -- npx -y bilaga-mcp`;
 export default function AccountPage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [email, setEmail] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [loginToken, setLoginToken] = useState('');
   const [agentToken, setAgentToken] = useState('');
+  const [agentOpen, setAgentOpen] = useState<boolean | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(true);
   const [methods, setMethods] = useState<{ email: boolean; google: boolean }>({ email: true, google: false });
@@ -262,8 +265,12 @@ export default function AccountPage() {
               )}
             </section>
             <RequestManager />
-            <details>
-              <summary>Agent access: tokens and MCP</summary>
+            {/* Open by default until the first agent is connected. */}
+            <details
+              open={agentOpen ?? (account.tokens.length === 0 || !!agentToken)}
+              onToggle={(e) => setAgentOpen(e.currentTarget.open)}
+            >
+              <summary>Connect your agent</summary>
               <p>
                 Click below to create a token. Each token gives an agent access
                 to your transfers. Save it securely; you can revoke it here
@@ -306,10 +313,23 @@ export default function AccountPage() {
                     Copy token
                   </button>
                   <p>
-                    Using Claude Code? Paste this one line in a terminal and
-                    you are done. It stores the token on your machine and adds
-                    the Bilaga MCP server.
+                    Using Codex? Paste this one line in a terminal and you are
+                    done. It stores the token on your machine and adds the
+                    Bilaga MCP server.
                   </p>
+                  <code className="token-value">{codexSetupCommand(agentToken)}</code>
+                  <button
+                    className="account-button"
+                    onClick={() =>
+                      act(async () => {
+                        await navigator.clipboard.writeText(codexSetupCommand(agentToken));
+                        setMessage('Setup command copied.');
+                      })
+                    }
+                  >
+                    Copy Codex command
+                  </button>
+                  <p>Using Claude Code? Same idea:</p>
                   <code className="token-value">{setupCommand(agentToken)}</code>
                   <button
                     className="account-button"
@@ -320,7 +340,7 @@ export default function AccountPage() {
                       })
                     }
                   >
-                    Copy setup command
+                    Copy Claude Code command
                   </button>
                   <button
                     className="account-button secondary"

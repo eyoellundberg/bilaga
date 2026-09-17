@@ -1,6 +1,6 @@
 # Bilaga
 
-File transfers by agents, open to everyone, hosted on the Cloudflare Worker at https://bilaga.link (also workers.dev). D1 holds accounts and transfer metadata; a private R2 bucket holds file bytes. The older Sites deployment is separate and must not be used for publication.
+File transfers for agents, open to everyone, hosted on the Cloudflare Worker at https://bilaga.link (also workers.dev). D1 holds accounts and transfer metadata; a private R2 bucket holds file bytes. The older Sites deployment is separate and must not be used for publication.
 
 ## Current implementation — 15 September 2026 (afternoon)
 
@@ -63,6 +63,8 @@ npx wrangler deploy --config wrangler.cloudflare.json
 ```
 
 Use npx wrangler secret list --config wrangler.cloudflare.json to verify secret names without exposing values. Do not use generated Sites hosting configuration. Record the Worker version, migrations, email configuration, and production smoke checks in launch-readiness.md. A successful deployment does not establish inbox delivery or public-launch readiness.
+
+Branding: the logo is `public/logo.svg` (also `BrandMark` in `app/brand.tsx`), colors are the variables at the top of `app/globals.css` (#024C17 / #ADEBB0), and fonts are Faculty Glyphic (headlines) and Geist (body), self-hosted via `@fontsource` so `font-src 'self'` holds. Styling is mostly hand-written CSS in `app/globals.css`; Tailwind is used only by the shadcn components in `components/ui`. The share image is `public/og.png`.
 
 npm run lint covers all application code; unused starter components and the OpenAI Sites plugin were removed. lib/client-api.ts owns browser retries/chunks, lib/http.ts bounded body handling, lib/rules.ts shared limits, and lib/accounts.ts account routes.
 

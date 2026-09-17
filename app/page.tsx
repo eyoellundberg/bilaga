@@ -3,6 +3,7 @@
 import { Brand } from '@/app/brand';
 import { ArrowDown, ArrowUpRight, Terminal } from 'lucide-react';
 import UploadPanel from './upload-panel';
+import { CopyPrompt } from './copy-prompt';
 import {
   CREDIT_VALIDITY_YEARS,
   FREE_MONTHLY_TRANSFERS,
@@ -25,7 +26,7 @@ const jsonLd = JSON.stringify({
   applicationCategory: 'UtilitiesApplication',
   operatingSystem: 'Any',
   description:
-    'File transfers by agents. Your agent sends a file up to 50 GB; anyone with the link picks it up within 30 days. Every transfer gets a signed receipt. Open source under MIT, no subscriptions.',
+    'File transfers for agents. Your agent sends a file up to 50 GB; anyone with the link picks it up within 30 days. Every transfer gets a signed receipt. Open source under MIT, no subscriptions.',
   license: 'https://opensource.org/licenses/MIT',
   codeRepository: 'https://github.com/eyoellundberg/bilaga',
   offers: [
@@ -64,10 +65,17 @@ export default function Home() {
     <main className="shell">
       <header className="site-header">
         <Brand />
-        <nav>
+        <input type="checkbox" id="nav-toggle" className="nav-toggle" />
+        <label htmlFor="nav-toggle" className="nav-burger" aria-label="Menu">
+          <span />
+          <span />
+          <span />
+        </label>
+        <nav className="nav-collapsible">
           <a href="/docs">
             For agents <ArrowUpRight size={15} />
           </a>
+          <a href="#how">How it works</a>
           <a href="#pricing">Pricing</a>
           <a href="/account">Account</a>
           <span className="pill">
@@ -83,12 +91,12 @@ export default function Home() {
           <h1>
             File transfers
             <br />
-            <span>by agents.</span>
+            <span>for agents.</span>
           </h1>
           <p className="lede">
-            Your agent sends the file.
+            Ask your AI agent to send a file. It hands back a link.
             <br />
-            Anyone with the link picks it up. Every transfer gets a signed receipt.
+            Anyone can open it, no account needed. Every transfer gets a signed receipt.
           </p>
           <a className="text-link" href="/docs">
             <Terminal size={18} />
@@ -99,8 +107,57 @@ export default function Home() {
             <span>30 days to download</span>
             <span>Signed receipts</span>
           </div>
+          <a
+            className="product-hunt-badge"
+            href="https://www.producthunt.com/products/bilaga?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-bilaga"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Find Bilaga on Product Hunt"
+          >
+            {/* Product Hunt serves this live SVG; the site's image proxy is disabled. */}
+            {/* oxlint-disable-next-line next/no-img-element */}
+            <img
+              src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1253070&theme=light&t=1789629066925"
+              alt="Bilaga — File transfers for agents on Product Hunt"
+              width="250"
+              height="54"
+            />
+          </a>
         </div>
         <UploadPanel />
+      </section>
+      <section id="how" className="pricing">
+        <div>
+          <p className="eyebrow">HOW IT WORKS</p>
+          <h2>Two steps. Then it is just something your agent can do.</h2>
+        </div>
+        <div className="tiers">
+          <div className="tier">
+            <h3>1 · Create a free account</h3>
+            <p>Sign in with email or Google. No card, no subscription.</p>
+            <a className="tier-link" href="/account">
+              Create account <ArrowUpRight size={15} />
+            </a>
+          </div>
+          <div className="tier">
+            <h3>2 · Connect your agent</h3>
+            <p>
+              Press &ldquo;Connect an agent&rdquo; on your account page and paste the one line it gives you into Codex
+              or Claude Code. Any other agent: send it this.
+            </p>
+            <CopyPrompt text="Connect to bilaga.link so you can send files for me. Setup is at https://bilaga.link/llms.txt" />
+          </div>
+          <div className="tier">
+            <h3>That&apos;s it</h3>
+            <p>
+              Now say &ldquo;send the render to Maya&rdquo; and go do something else. Your agent uploads the file and
+              passes on the link.
+            </p>
+            <a className="tier-link" href="/docs">
+              Full setup guide <ArrowUpRight size={15} />
+            </a>
+          </div>
+        </div>
       </section>
       <section id="pricing" className="pricing">
         <div>
@@ -129,6 +186,9 @@ export default function Home() {
         <span>
           bilaga <span className="muted">/ Swedish for attachment.</span>
         </span>
+        <a href="https://x.com/bilagalink" target="_blank" rel="noopener noreferrer">
+          @bilagalink <ArrowUpRight size={14} />
+        </a>
         <a href="/llms.txt">
           llms.txt <ArrowDown size={14} />
         </a>

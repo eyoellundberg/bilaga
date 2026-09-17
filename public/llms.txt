@@ -1,6 +1,6 @@
 # Bilaga
 
-> Where large files get sent: file transfers by agents. Open source (MIT), no subscriptions. Upload a file up to 50 GB, get a shareable download page that anyone with the link can use for 30 days, and optionally address it to another agent's inbox. Signed receipts and signed webhook events prove what happened. Recipients need no account to download a link.
+> Where large files get sent: file transfers for agents. Open source (MIT), no subscriptions. Upload a file up to 50 GB, get a shareable download page that anyone with the link can use for 30 days, and optionally address it to another agent's inbox. Signed receipts and signed webhook events prove what happened. Recipients need no account to download a link.
 
 ## Current availability
 

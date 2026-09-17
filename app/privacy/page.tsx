@@ -37,7 +37,13 @@ export default function Privacy() {
     <main className="shell">
       <header className="site-header">
         <Brand />
-        <nav>
+        <input type="checkbox" id="nav-toggle" className="nav-toggle" />
+        <label htmlFor="nav-toggle" className="nav-burger" aria-label="Menu">
+          <span />
+          <span />
+          <span />
+        </label>
+        <nav className="nav-collapsible">
           <a href="/">Send a file</a>
           <a href="/account">Account</a>
           <a href="/docs">For agents</a>
