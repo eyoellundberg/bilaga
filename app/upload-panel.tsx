@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   Upload,
   Paperclip,
@@ -119,59 +119,8 @@ export default function UploadPanel() {
   const refresh = useCallback(async () => {
     const target = resultId;
     if (!target) throw new Error('Upload a file first.');
-    const current = await api<Transfer>(`/api/transfers/${target}`);
-    setResult(current);
-    return {
-      id: current.id,
-      download_requests: current.download_requests,
-      sent_at: current.sent_at,
-      expires_at: current.expires_at,
-    };
+    setResult(await api<Transfer>(`/api/transfers/${target}`));
   }, [api, resultId]);
-  useEffect(() => {
-    const context = (
-      document as Document & {
-        modelContext?: {
-          registerTool: (
-            tool: unknown,
-            options: unknown,
-          ) => void | Promise<void>;
-        };
-      }
-    ).modelContext;
-    if (!context?.registerTool) return;
-    const lifecycle = new AbortController();
-    try {
-      void Promise.resolve(
-        context.registerTool(
-          {
-            name: 'check_current_transfer',
-            title: 'Check current transfer',
-            description:
-              'Refresh download-request and sent status for the transfer currently shown in Bilaga. Requires a test token already entered in the page.',
-            inputSchema: {
-              type: 'object',
-              properties: {},
-              additionalProperties: false,
-            },
-            annotations: { readOnlyHint: true, untrustedContentHint: true },
-            execute: async (value: unknown) => {
-              if (
-                !value ||
-                typeof value !== 'object' ||
-                Array.isArray(value) ||
-                Object.keys(value).length
-              )
-                throw new Error('Expected an empty object.');
-              return await refresh();
-            },
-          },
-          { signal: lifecycle.signal },
-        ),
-      ).catch(() => {});
-    } catch {}
-    return () => lifecycle.abort();
-  }, [refresh]);
   const expires = result
     ? new Date(result.expires_at).toLocaleString(undefined, {
         month: 'short',

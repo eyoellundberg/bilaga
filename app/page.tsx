@@ -1,6 +1,7 @@
 // Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
 /* oxlint-disable next/no-html-link-for-pages */
 import { Brand } from '@/app/brand';
+import { MobileNav } from './mobile-nav';
 import { ArrowDown, ArrowUpRight, Terminal } from 'lucide-react';
 import UploadPanel from './upload-panel';
 import { CopyPrompt } from './copy-prompt';
@@ -65,13 +66,7 @@ export default function Home() {
     <main className="shell">
       <header className="site-header">
         <Brand />
-        <input type="checkbox" id="nav-toggle" className="nav-toggle" />
-        <label htmlFor="nav-toggle" className="nav-burger" aria-label="Menu">
-          <span />
-          <span />
-          <span />
-        </label>
-        <nav className="nav-collapsible">
+        <MobileNav>
           <a href="/docs">
             For agents <ArrowUpRight size={15} />
           </a>
@@ -82,7 +77,7 @@ export default function Home() {
             <i />
             Open to everyone
           </span>
-        </nav>
+        </MobileNav>
       </header>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
       <section className="workspace">

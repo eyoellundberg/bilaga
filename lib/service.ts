@@ -529,6 +529,469 @@ async function download(req: Request, id: string) {
   if (bearer) await markReceived(t, bearer, origin);
   return new Response(object.body, { status: range ? 206 : 200, headers });
 }
+// Stripe calls this with no Origin header and a raw JSON body; the HMAC is the auth.
+async function stripeWebhook(req: Request) {
+  const raw = new TextDecoder().decode(await boundedBody(req, 65_536));
+  if (!(await verifyStripeSignature(req.headers.get('Stripe-Signature'), raw)))
+    return fail(400, 'bad_signature', 'Invalid Stripe signature.');
+  let event: { created?: number; type?: string; data?: { object?: { id?: string; payment_status?: string; amount_total?: number; currency?: string; metadata?: { account_id?: string; offer?: string } } } };
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return fail(400, 'invalid_json', 'Send a JSON object.');
+  }
+  const session = event?.data?.object;
+  if (event?.type !== 'checkout.session.completed' || !session?.id) return json({ received: true, ignored: event?.type });
+  const accountId = session.metadata?.account_id || '';
+  const amount = session.amount_total ?? 0;
+  if (session.payment_status !== 'paid' || session.currency !== 'usd' || !/^[a-f0-9]{32}$/.test(accountId) || !Number.isInteger(amount) || amount <= 0)
+    return json({ received: true, ignored: 'unpaid_or_malformed' });
+  // Sessions from the current offer credit their pack; older sessions
+  // retain their original dollar-for-dollar credit.
+  const offer = session.metadata?.offer;
+  if (offer && offer !== CURRENT_OFFER)
+    return fail(400, 'invalid_offer', 'Unknown top-up offer.');
+  const current = offer === CURRENT_OFFER;
+  const pack = current ? topUpPack(amount) : undefined;
+  if (current && !pack) return fail(400, 'invalid_pack', 'Unknown top-up pack.');
+  const credit = pack?.credit_cents ?? amount;
+  // Idempotent on the session id: replayed webhooks credit nothing.
+  const ledgerId = `stripe_${session.id}`.slice(0, 200);
+  const now = Number.isSafeInteger(event.created) && event.created! > 0 ? event.created! * 1000 : Date.now();
+  const results = await db().batch([
+    db()
+      .prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM ledger WHERE id=?)`)
+      .bind(credit, accountId, ledgerId),
+    db()
+      .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at,expires_at,paid_cents)
+        SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'purchase',NULL,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM ledger WHERE id=?) AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)`)
+      .bind(ledgerId, accountId, credit, accountId, `Card top-up${pack ? ` (${pack.name})` : ''}: paid ${usd(amount)} for ${usd(credit)} of credit`, now, current ? creditExpiry(now) : null, amount, ledgerId, accountId),
+  ]);
+  return json({ received: true, credited: results[1].meta.changes > 0 });
+}
+
+async function balance(owner: string) {
+  const me = await accountIdentity(owner);
+  if (!me) return fail(403, 'account_required', 'Balances need an account token.');
+  const credits = await creditSummary(me.id);
+  const rows = (
+    await db()
+      .prepare('SELECT delta_cents,balance_after,kind,transfer_id,note,created_at FROM ledger WHERE account_id=? ORDER BY created_at DESC LIMIT 50')
+      .bind(me.id)
+      .all<{ delta_cents: number; balance_after: number; kind: string; transfer_id: string | null; note: string | null; created_at: number }>()
+  ).results;
+  return json({
+    account: me.handle,
+    ...credits,
+    currency: 'USD',
+    top_ups: stripeConfigured()
+      ? `Add credit at /account. ${describePacks()}`
+      : 'Card top-ups are not configured; credit is granted by the operator.',
+    ledger: rows.map((r) => ({ ...r, created_at: iso(r.created_at) })),
+  });
+}
+
+async function inboxRoutes(p: string[], method: string, owner: string, origin: string) {
+  const me = await accountIdentity(owner);
+  if (!me?.email)
+    return fail(403, 'account_required', 'The inbox needs an account token.');
+  if (p.length === 1 && method === 'GET') {
+    const rows = (
+      await db()
+        .prepare(
+          "SELECT * FROM transfers WHERE recipient=? AND state='complete' AND expires_at>? ORDER BY completed_at DESC LIMIT 50",
+        )
+        .bind(me.email, Date.now())
+        .all<Transfer>()
+    ).results;
+    return json({
+      account: me.handle,
+      transfers: await Promise.all(rows.map((t) => inboxData(t, origin))),
+    });
+  }
+  if (p.length === 3 && /^[a-f0-9]{32}$/.test(p[1]) && p[2] === 'pay' && method === 'POST') {
+    await rateLimit(`pay:${me.id}`, 30);
+    const t = await db()
+      .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
+      .bind(p[1], me.email)
+      .first<Transfer>();
+    if (!t) return fail(404, 'not_found', 'No transfer addressed to you has that id.');
+    if (t.expires_at <= Date.now()) return fail(410, 'expired', 'This transfer has expired.');
+    if (t.price_cents === 0) return fail(409, 'not_priced', 'This transfer is free.');
+    if (t.owner === me.id) return fail(409, 'own_transfer', 'You cannot pay for your own transfer.');
+    if (t.paid_at) {
+      if (t.paid_by !== me.id) return fail(409, 'already_paid', 'Someone else already paid for this transfer.');
+    } else {
+      const balance = await db()
+        .prepare('SELECT balance_cents FROM accounts WHERE id=?')
+        .bind(me.id)
+        .first<{ balance_cents: number }>();
+      if ((balance?.balance_cents ?? 0) < t.price_cents)
+        return fail(402, 'insufficient_balance', `Your balance is ${balance?.balance_cents ?? 0} cents; this transfer costs ${t.price_cents}.`);
+      if (!(await settle(t, me)))
+        return fail(409, 'payment_conflict', 'The transfer was paid or changed concurrently. Check the inbox again.');
+      const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
+      await recordEvent(t.owner, 'transfer.paid', { ...eventData(fresh, origin), paid_by: me.handle, net_cents: t.price_cents - feeCents(t.price_cents) });
+      await recordEvent(me.id, 'transfer.paid', { ...(await inboxData(fresh, origin)), paid_by: me.handle });
+      await markReceived(fresh, me, origin);
+    }
+    const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
+    return json(await inboxData(fresh, origin));
+  }
+  if (p.length === 3 && /^[a-f0-9]{32}$/.test(p[1]) && p[2] === 'received' && method === 'POST') {
+    const t = await db()
+      .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
+      .bind(p[1], me.email)
+      .first<Transfer>();
+    if (!t) return fail(404, 'not_found', 'No transfer addressed to you has that id.');
+    await markReceived(t, me, origin);
+    const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
+    return json(await inboxData(fresh, origin));
+  }
+  return fail(404, 'not_found', 'Endpoint not found.');
+}
+
+async function createTransfer(req: Request, owner: string, guest: FileRequest | null, origin: string) {
+  if (
+    req.headers.get('Content-Type')?.split(';')[0].trim() !==
+    'application/json'
+  )
+    return fail(415, 'content_type', 'Use Content-Type: application/json.');
+  const body = await bodyJson(req);
+  if (!body || typeof body !== 'object' || Array.isArray(body))
+    return fail(400, 'invalid_json', 'Send a JSON object.');
+  if (guest) {
+    if (Object.keys(body).some(key => !['filename','size_bytes'].includes(key)))
+      return fail(400, 'invalid_request', 'Request uploads accept only filename and size_bytes.');
+    const requester = await accountIdentity(owner);
+    if (!requester?.email) return fail(410, 'request_closed', 'This request is no longer available.');
+    body.to = requester.email;
+  }
+  if (!validSize(body.size_bytes))
+    return fail(
+      400,
+      'invalid_size',
+      'Files must be between 1 byte and 50 GB.',
+    );
+  if (body.size_bytes > LIMITS.max_file_bytes)
+    return fail(413, 'too_large', `Files can be at most ${fileLabel(LIMITS.max_file_bytes)}.`);
+  let filename: string;
+  try {
+    filename = cleanFilename(body.filename);
+  } catch (e) {
+    return fail(400, 'invalid_filename', (e as Error).message);
+  }
+  if (
+    body.sender !== undefined &&
+    (typeof body.sender !== 'string' || body.sender.length > 80)
+  )
+    return fail(
+      400,
+      'invalid_sender',
+      'Sender must be at most 80 characters.',
+    );
+  // Addressing. `to` is an email; `in_reply_to` chains this transfer to one
+  // the creator received, and defaults `to` to that transfer's sender.
+  let recipient: string | null = null;
+  let inReplyTo: string | null = null;
+  if (body.to !== undefined && body.to !== null) {
+    const to = typeof body.to === 'string' ? body.to.trim().toLowerCase() : '';
+    if (!to || to.length > 254 || !EMAIL.test(to))
+      return fail(400, 'invalid_recipient', 'to must be a valid email address.');
+    recipient = to;
+  }
+  if (body.in_reply_to !== undefined && body.in_reply_to !== null) {
+    if (typeof body.in_reply_to !== 'string' || !/^[a-f0-9]{32}$/.test(body.in_reply_to))
+      return fail(400, 'invalid_reply', 'in_reply_to must be a transfer public id.');
+    const me = await accountIdentity(owner);
+    const original = me?.email
+      ? await db()
+          .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
+          .bind(body.in_reply_to, me.email)
+          .first<Transfer>()
+      : null;
+    if (!original)
+      return fail(404, 'invalid_reply', 'You can only reply to a transfer addressed to you.');
+    inReplyTo = original.public_id;
+    if (!recipient) {
+      const sender = await accountIdentity(original.owner);
+      if (!sender?.email)
+        return fail(409, 'sender_gone', 'The original sender no longer has an account. Set `to` explicitly.');
+      recipient = sender.email;
+    }
+  }
+  let price = 0;
+  if (body.price_cents !== undefined && body.price_cents !== null) {
+    if (!validPrice(body.price_cents))
+      return fail(400, 'invalid_price', 'price_cents must be an integer between 0 and 1,000,000.');
+    price = body.price_cents;
+    if (price > 0 && !recipient)
+      return fail(400, 'price_needs_recipient', 'A priced transfer must be addressed with `to`.');
+    if (price > 0 && owner.length === 64)
+      return fail(403, 'account_required', 'Priced transfers need an account token.');
+  }
+  // Only the purge runs inline; webhooks and pruning stay on the scheduled job.
+  await purgeExpired().catch(() => console.error('Inline purge failed'));
+  const id = crypto.randomUUID().replaceAll('-', ''),
+    publicId = crypto.randomUUID().replaceAll('-', ''),
+    now = Date.now();
+  // Free allowance or a charge from the balance. The owner test token is
+  // never charged; accounts pay the storage price once they are past the
+  // free storage or the free monthly count.
+  let charge = 0;
+  if (owner.length !== 64) {
+    const usage = await db()
+      .prepare(
+        `SELECT (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND (state<>'deleted' OR completed_at IS NOT NULL)) AS monthly,
+                COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0) AS stored,
+                (SELECT balance_cents FROM accounts WHERE id=?) AS balance`,
+      )
+      .bind(owner, now - MONTH, owner, owner)
+      .first<{ monthly: number; stored: number; balance: number }>();
+    const withinFree =
+      (usage?.monthly ?? 0) < LIMITS.free_transfers_per_30_days &&
+      (usage?.stored ?? 0) + body.size_bytes <= LIMITS.free_stored_bytes;
+    if (!withinFree) {
+      charge = quoteCents(body.size_bytes);
+      if ((usage?.balance ?? 0) < charge)
+        return fail(
+          402,
+          'insufficient_balance',
+          guest ? 'The requester needs to add credit before this file can be uploaded. Please contact them.' : `This transfer is outside your free allowance (${fileLabel(LIMITS.free_stored_bytes)} stored, ${LIMITS.free_transfers_per_30_days} transfers per 30 days) and costs ${(charge / 100).toFixed(2)} USD. Your balance is ${((usage?.balance ?? 0) / 100).toFixed(2)} USD. Add credit at ${origin}/account.`,
+        );
+    }
+  }
+  // Recheck free eligibility in the reservation: concurrent requests may
+  // have consumed it since the quote. A rejected request can retry for a paid quote.
+  // Reserve quota, the charge, and the record atomically BEFORE allocating any storage.
+  const results = await db().batch([
+    db()
+      .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,price_cents,charged_cents,state,created_at,expires_at,request_id)
+  SELECT ?,?,?,?,?,?,?,?,?,?,'initializing',?,?,? WHERE
+  (? IS NULL OR EXISTS(SELECT 1 FROM file_requests r WHERE r.id=? AND r.owner=? AND r.submitted_at IS NULL AND r.revoked_at IS NULL AND r.expires_at>?
+    AND ?<=r.max_file_bytes AND (SELECT COUNT(*) FROM transfers WHERE request_id=r.id)<r.max_files
+    AND COALESCE((SELECT SUM(size) FROM transfers WHERE request_id=r.id),0)+?<=r.max_total_bytes)) AND
+  (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL AND balance_cents>=?)) AND
+  (length(?)=64 OR ?>0 OR (
+    (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND (state<>'deleted' OR completed_at IS NOT NULL)) < ? AND
+    COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ?
+  )) AND
+  (SELECT count(*) FROM transfers WHERE owner=? AND state IN ('initializing','uploading','completing') AND purged_at IS NULL) < ? AND
+  COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ? RETURNING id`)
+      .bind(
+        id, publicId, owner, filename, body.size_bytes, body.sender || null, recipient, inReplyTo, price, charge,
+        now, now + DAY, guest?.id ?? null,
+        guest?.id ?? null, guest?.id ?? null, owner, now, body.size_bytes, body.size_bytes,
+        owner, owner, charge,
+        owner, charge, owner, now - MONTH, LIMITS.free_transfers_per_30_days,
+        owner, body.size_bytes, LIMITS.free_stored_bytes,
+        owner, LIMITS.max_pending_uploads,
+        owner, body.size_bytes, LIMITS.max_stored_bytes,
+      ),
+    db()
+      .prepare(`UPDATE accounts SET balance_cents=balance_cents-? WHERE id=? AND ?>0 AND EXISTS(SELECT 1 FROM transfers WHERE id=?)`)
+      .bind(charge, owner, charge, id),
+    db()
+      .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
+        SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'charge',?,?,? WHERE ?>0 AND EXISTS(SELECT 1 FROM transfers WHERE id=?)`)
+      .bind(crypto.randomUUID().replaceAll('-', ''), owner, -charge, owner, id, `Transfer of ${filename} (${fileLabel(body.size_bytes)})`, now, charge, id),
+  ]);
+  if (!results[0].results.length)
+    return fail(
+      429,
+      'account_limit',
+      guest ? 'The request is closed or its file, size, or account allowance has been reached. Contact the requester.' : `Limit reached: ${LIMITS.max_pending_uploads} unfinished upload${LIMITS.max_pending_uploads === 1 ? '' : 's'}, ${fileLabel(LIMITS.max_stored_bytes)} reserved storage, or an insufficient balance.`,
+    );
+  let multi: R2MultipartUpload | undefined;
+  try {
+    multi = await bucket().createMultipartUpload(`transfers/${id}`, {
+      httpMetadata: { contentType: 'application/octet-stream' },
+    });
+    const activated = await db()
+      .prepare(
+        "UPDATE transfers SET state='uploading',upload_id=? WHERE id=? AND state='initializing' RETURNING id",
+      )
+      .bind(multi.uploadId, id)
+      .first();
+    if (!activated) {
+      await multi.abort();
+      return fail(410, 'deleted', 'The upload was revoked.');
+    }
+  } catch (e) {
+    await db()
+      .prepare(
+        "UPDATE transfers SET state='deleted',upload_id=?,filename='Deleted file',sender=NULL WHERE id=?",
+      )
+      .bind(multi?.uploadId || null, id)
+      .run();
+    throw e;
+  }
+  const t = await owned(id, owner);
+  return json(
+    guest ? dropTransfer(t) : { ...privateData(t, origin), upload_expires_at: iso(now + DAY) },
+    201,
+  );
+}
+
+async function uploadPart(req: Request, t: Transfer, part: string) {
+  if (t.state !== 'uploading')
+    return fail(
+      409,
+      'invalid_state',
+      'Upload is already complete or being finalized.',
+    );
+  const n = Number(part),
+    count = Math.ceil(t.size / PART_BYTES);
+  if (!Number.isInteger(n) || n < 1 || n > count)
+    return fail(400, 'invalid_part', 'Invalid part number.');
+  if (activeChunkRequests >= 2)
+    return fail(
+      429,
+      'upload_busy',
+      'Two chunks are already being processed. Retry shortly.',
+    );
+  activeChunkRequests++;
+  try {
+    const expected = Math.min(PART_BYTES, t.size - (n - 1) * PART_BYTES),
+      data = await boundedBody(req, expected);
+    if (data.byteLength !== expected)
+      return fail(
+        400,
+        'invalid_part_size',
+        `Expected ${expected} bytes for this part.`,
+      );
+    const hash = await sha256(data);
+    // Reserve an immutable chunk identity. Concurrent retries cannot replace it with different bytes.
+    const reserved = await db()
+      .prepare(`INSERT INTO parts (transfer_id,number,etag,size,content_hash)
+    SELECT ?,?,'',?,? WHERE EXISTS(SELECT 1 FROM transfers WHERE id=? AND state='uploading' AND expires_at>?)
+    ON CONFLICT(transfer_id,number) DO UPDATE SET etag=CASE WHEN parts.content_hash IS NULL THEN '' ELSE parts.etag END,content_hash=COALESCE(parts.content_hash,excluded.content_hash)
+    WHERE parts.content_hash IS NULL OR parts.content_hash=excluded.content_hash RETURNING etag,content_hash`)
+      .bind(t.id, n, data.byteLength, hash, t.id, Date.now())
+      .first<{ etag: string; content_hash: string }>();
+    if (!reserved)
+      return fail(
+        409,
+        'part_conflict',
+        'Transfer is no longer uploadable, or this part contains different bytes.',
+      );
+    if (reserved.etag)
+      return json({ part_number: n, size_bytes: data.byteLength });
+    const part = await bucket()
+      .resumeMultipartUpload(key(t), t.upload_id!)
+      .uploadPart(n, data);
+    const saved = await db()
+      .prepare(`UPDATE parts SET etag=? WHERE transfer_id=? AND number=? AND content_hash=? AND
+    EXISTS(SELECT 1 FROM transfers WHERE id=? AND state='uploading' AND expires_at>?) RETURNING number`)
+      .bind(part.etag, t.id, n, hash, t.id, Date.now())
+      .first();
+    if (!saved)
+      return fail(410, 'unavailable', 'The upload expired or was revoked.');
+    return json({ part_number: n, size_bytes: data.byteLength });
+  } finally {
+    activeChunkRequests--;
+  }
+}
+
+async function completeTransfer(t: Transfer, owner: string, guest: FileRequest | null, origin: string) {
+  if (t.state === 'complete') return json(guest ? dropTransfer(t) : privateData(t, origin));
+  const parts = await uploadParts(t);
+  if (
+    parts.length !== Math.ceil(t.size / PART_BYTES) ||
+    parts.some((p) => !p.etag) ||
+    parts.reduce((n, p) => n + p.size, 0) !== t.size
+  )
+    return fail(
+      409,
+      'incomplete',
+      'Upload every part before completing the transfer.',
+    );
+  let object = await bucket().head(key(t));
+  if (!object) {
+    const leaseUntil = Date.now() + 120_000;
+    const lock = await db()
+      .prepare(
+        "UPDATE transfers SET state='completing',completion_lock_until=? WHERE id=? AND (state='uploading' OR (state='completing' AND completion_lock_until<?))",
+      )
+      .bind(leaseUntil, t.id, Date.now())
+      .run();
+    if (!lock.meta.changes)
+      return fail(
+        409,
+        'completing',
+        'Completion is in progress. Poll status; retry completion if it remains pending.',
+      );
+    try {
+      object = await bucket()
+        .resumeMultipartUpload(key(t), t.upload_id!)
+        .complete(
+          parts.map((p) => ({ partNumber: p.number, etag: p.etag })),
+        );
+    } catch (e) {
+      if ((await owned(t.id, owner)).state === 'deleted')
+        return fail(410, 'deleted', 'The upload was revoked.');
+      await db()
+        .prepare(
+          "UPDATE transfers SET state='uploading' WHERE id=? AND state='completing' AND completion_lock_until=?",
+        )
+        .bind(t.id, leaseUntil)
+        .run();
+      throw e;
+    }
+  }
+  if (object.size !== t.size)
+    return fail(
+      409,
+      'size_mismatch',
+      'Stored file size did not match the declared size.',
+    );
+  const now = Date.now();
+  const hashes = parts.map((p) => p.content_hash);
+  const digest = hashes.every((h): h is string => !!h)
+    ? await contentHash(hashes)
+    : null;
+  await db()
+    .prepare(
+      `UPDATE transfers SET state='complete',completed_at=?,expires_at=?,upload_id=NULL,content_hash=? WHERE id=? AND state IN ('uploading','completing') AND expires_at>?
+      AND (request_id IS NULL OR EXISTS(SELECT 1 FROM file_requests r JOIN accounts a ON a.id=r.owner
+        WHERE r.id=transfers.request_id AND r.submitted_at IS NULL AND r.revoked_at IS NULL AND r.expires_at>? AND a.deleted_at IS NULL))`,
+    )
+    .bind(now, now + LIMITS.retention_ms, digest, t.id, now, now)
+    .run();
+  t = await owned(t.id, owner);
+  // Deletion can race completion; never revive a revoked transfer or keep its bytes.
+  if (t.state !== 'complete') {
+    await db()
+      .prepare('UPDATE transfers SET purged_at=NULL WHERE id=?')
+      .bind(t.id)
+      .run();
+    await removeBytes({ ...t, purged_at: null });
+    return fail(410, 'deleted', 'Transfer was deleted.');
+  }
+  await recordEvent(owner, 'transfer.completed', eventData(t, origin));
+  if (t.in_reply_to) {
+    const original = await db()
+      .prepare('SELECT owner FROM transfers WHERE public_id=?')
+      .bind(t.in_reply_to)
+      .first<{ owner: string }>();
+    if (original)
+      await recordEvent(original.owner, 'transfer.reply', {
+        public_id: t.public_id,
+        filename: t.filename,
+        size_bytes: t.size,
+        sender: t.sender,
+        from_account: await handleOf(owner),
+        in_reply_to: t.in_reply_to,
+        price_cents: t.price_cents,
+        content_hash: t.content_hash,
+        share_url: `${origin}/t/${t.public_id}`,
+        receipt_url: `${origin}/api/receipts/${t.public_id}`,
+        completed_at: iso(t.completed_at),
+        expires_at: iso(t.expires_at),
+      });
+  }
+  return json(guest ? dropTransfer(t) : privateData(t, origin));
+}
 export async function handleApi(req: Request) {
   try {
     const u = new URL(req.url),
@@ -555,46 +1018,8 @@ export async function handleApi(req: Request) {
           'Cross-origin changes are not allowed.',
         );
     }
-    // Stripe calls this with no Origin header and a raw JSON body; the HMAC is the auth.
-    if (p.length === 2 && p[0] === 'stripe' && p[1] === 'webhook' && method === 'POST') {
-      const raw = new TextDecoder().decode(await boundedBody(req, 65_536));
-      if (!(await verifyStripeSignature(req.headers.get('Stripe-Signature'), raw)))
-        return fail(400, 'bad_signature', 'Invalid Stripe signature.');
-      let event: { created?: number; type?: string; data?: { object?: { id?: string; payment_status?: string; amount_total?: number; currency?: string; metadata?: { account_id?: string; offer?: string } } } };
-      try {
-        event = JSON.parse(raw);
-      } catch {
-        return fail(400, 'invalid_json', 'Send a JSON object.');
-      }
-      const session = event?.data?.object;
-      if (event?.type !== 'checkout.session.completed' || !session?.id) return json({ received: true, ignored: event?.type });
-      const accountId = session.metadata?.account_id || '';
-      const amount = session.amount_total ?? 0;
-      if (session.payment_status !== 'paid' || session.currency !== 'usd' || !/^[a-f0-9]{32}$/.test(accountId) || !Number.isInteger(amount) || amount <= 0)
-        return json({ received: true, ignored: 'unpaid_or_malformed' });
-      // Sessions from the current offer credit their pack; older sessions
-      // retain their original dollar-for-dollar credit.
-      const offer = session.metadata?.offer;
-      if (offer && offer !== CURRENT_OFFER)
-        return fail(400, 'invalid_offer', 'Unknown top-up offer.');
-      const current = offer === CURRENT_OFFER;
-      const pack = current ? topUpPack(amount) : undefined;
-      if (current && !pack) return fail(400, 'invalid_pack', 'Unknown top-up pack.');
-      const credit = pack?.credit_cents ?? amount;
-      // Idempotent on the session id: replayed webhooks credit nothing.
-      const ledgerId = `stripe_${session.id}`.slice(0, 200);
-      const now = Number.isSafeInteger(event.created) && event.created! > 0 ? event.created! * 1000 : Date.now();
-      const results = await db().batch([
-        db()
-          .prepare(`UPDATE accounts SET balance_cents=balance_cents+? WHERE id=? AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM ledger WHERE id=?)`)
-          .bind(credit, accountId, ledgerId),
-        db()
-          .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at,expires_at,paid_cents)
-            SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'purchase',NULL,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM ledger WHERE id=?) AND EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)`)
-          .bind(ledgerId, accountId, credit, accountId, `Card top-up${pack ? ` (${pack.name})` : ''}: paid ${usd(amount)} for ${usd(credit)} of credit`, now, current ? creditExpiry(now) : null, amount, ledgerId, accountId),
-      ]);
-      return json({ received: true, credited: results[1].meta.changes > 0 });
-    }
+    if (p.length === 2 && p[0] === 'stripe' && p[1] === 'webhook' && method === 'POST')
+      return await stripeWebhook(req);
     const accountResponse = await accountRoutes(req, p, rateLimit);
     if (accountResponse) return accountResponse;
     if (p.length === 1 && p[0] === 'config' && method === 'GET')
@@ -715,24 +1140,7 @@ export async function handleApi(req: Request) {
       return json({ account: account.handle, balance_cents: account.balance_cents });
     }
     if (p.length === 1 && p[0] === 'balance' && method === 'GET') {
-      const me = await accountIdentity(owner);
-      if (!me) return fail(403, 'account_required', 'Balances need an account token.');
-      const credits = await creditSummary(me.id);
-      const rows = (
-        await db()
-          .prepare('SELECT delta_cents,balance_after,kind,transfer_id,note,created_at FROM ledger WHERE account_id=? ORDER BY created_at DESC LIMIT 50')
-          .bind(me.id)
-          .all<{ delta_cents: number; balance_after: number; kind: string; transfer_id: string | null; note: string | null; created_at: number }>()
-      ).results;
-      return json({
-        account: me.handle,
-        ...credits,
-        currency: 'USD',
-        top_ups: stripeConfigured()
-          ? `Add credit at /account. ${describePacks()}`
-          : 'Card top-ups are not configured; credit is granted by the operator.',
-        ledger: rows.map((r) => ({ ...r, created_at: iso(r.created_at) })),
-      });
+      return await balance(owner);
     }
     if (p.length === 1 && p[0] === 'cleanup' && method === 'POST') {
       if (owner !== bindings().BILAGA_TOKEN_HASH)
@@ -741,249 +1149,10 @@ export async function handleApi(req: Request) {
     }
     const eventResponse = await eventRoutes(req, p, owner, rateLimit);
     if (eventResponse) return eventResponse;
-    if (p[0] === 'inbox') {
-      const me = await accountIdentity(owner);
-      if (!me?.email)
-        return fail(403, 'account_required', 'The inbox needs an account token.');
-      if (p.length === 1 && method === 'GET') {
-        const rows = (
-          await db()
-            .prepare(
-              "SELECT * FROM transfers WHERE recipient=? AND state='complete' AND expires_at>? ORDER BY completed_at DESC LIMIT 50",
-            )
-            .bind(me.email, Date.now())
-            .all<Transfer>()
-        ).results;
-        return json({
-          account: me.handle,
-          transfers: await Promise.all(rows.map((t) => inboxData(t, u.origin))),
-        });
-      }
-      if (p.length === 3 && /^[a-f0-9]{32}$/.test(p[1]) && p[2] === 'pay' && method === 'POST') {
-        await rateLimit(`pay:${me.id}`, 30);
-        const t = await db()
-          .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
-          .bind(p[1], me.email)
-          .first<Transfer>();
-        if (!t) return fail(404, 'not_found', 'No transfer addressed to you has that id.');
-        if (t.expires_at <= Date.now()) return fail(410, 'expired', 'This transfer has expired.');
-        if (t.price_cents === 0) return fail(409, 'not_priced', 'This transfer is free.');
-        if (t.owner === me.id) return fail(409, 'own_transfer', 'You cannot pay for your own transfer.');
-        if (t.paid_at) {
-          if (t.paid_by !== me.id) return fail(409, 'already_paid', 'Someone else already paid for this transfer.');
-        } else {
-          const balance = await db()
-            .prepare('SELECT balance_cents FROM accounts WHERE id=?')
-            .bind(me.id)
-            .first<{ balance_cents: number }>();
-          if ((balance?.balance_cents ?? 0) < t.price_cents)
-            return fail(402, 'insufficient_balance', `Your balance is ${balance?.balance_cents ?? 0} cents; this transfer costs ${t.price_cents}.`);
-          if (!(await settle(t, me)))
-            return fail(409, 'payment_conflict', 'The transfer was paid or changed concurrently. Check the inbox again.');
-          const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
-          await recordEvent(t.owner, 'transfer.paid', { ...eventData(fresh, u.origin), paid_by: me.handle, net_cents: t.price_cents - feeCents(t.price_cents) });
-          await recordEvent(me.id, 'transfer.paid', { ...(await inboxData(fresh, u.origin)), paid_by: me.handle });
-          await markReceived(fresh, me, u.origin);
-        }
-        const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
-        return json(await inboxData(fresh, u.origin));
-      }
-      if (p.length === 3 && /^[a-f0-9]{32}$/.test(p[1]) && p[2] === 'received' && method === 'POST') {
-        const t = await db()
-          .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
-          .bind(p[1], me.email)
-          .first<Transfer>();
-        if (!t) return fail(404, 'not_found', 'No transfer addressed to you has that id.');
-        await markReceived(t, me, u.origin);
-        const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
-        return json(await inboxData(fresh, u.origin));
-      }
-      return fail(404, 'not_found', 'Endpoint not found.');
-    }
+    if (p[0] === 'inbox') return await inboxRoutes(p, method, owner, u.origin);
     if (p[0] !== 'transfers')
       return fail(404, 'not_found', 'Endpoint not found.');
-    if (p.length === 1 && method === 'POST') {
-      const limits = LIMITS;
-      if (
-        req.headers.get('Content-Type')?.split(';')[0].trim() !==
-        'application/json'
-      )
-        return fail(415, 'content_type', 'Use Content-Type: application/json.');
-      const body = await bodyJson(req);
-      if (!body || typeof body !== 'object' || Array.isArray(body))
-        return fail(400, 'invalid_json', 'Send a JSON object.');
-      if (guest) {
-        if (Object.keys(body).some(key => !['filename','size_bytes'].includes(key)))
-          return fail(400, 'invalid_request', 'Request uploads accept only filename and size_bytes.');
-        const requester = await accountIdentity(owner);
-        if (!requester?.email) return fail(410, 'request_closed', 'This request is no longer available.');
-        body.to = requester.email;
-      }
-      if (!validSize(body.size_bytes))
-        return fail(
-          400,
-          'invalid_size',
-          'Files must be between 1 byte and 50 GB.',
-        );
-      if (body.size_bytes > limits.max_file_bytes)
-        return fail(413, 'too_large', `Files can be at most ${fileLabel(limits.max_file_bytes)}.`);
-      let filename: string;
-      try {
-        filename = cleanFilename(body.filename);
-      } catch (e) {
-        return fail(400, 'invalid_filename', (e as Error).message);
-      }
-      if (
-        body.sender !== undefined &&
-        (typeof body.sender !== 'string' || body.sender.length > 80)
-      )
-        return fail(
-          400,
-          'invalid_sender',
-          'Sender must be at most 80 characters.',
-        );
-      // Addressing. `to` is an email; `in_reply_to` chains this transfer to one
-      // the creator received, and defaults `to` to that transfer's sender.
-      let recipient: string | null = null;
-      let inReplyTo: string | null = null;
-      if (body.to !== undefined && body.to !== null) {
-        const to = typeof body.to === 'string' ? body.to.trim().toLowerCase() : '';
-        if (!to || to.length > 254 || !EMAIL.test(to))
-          return fail(400, 'invalid_recipient', 'to must be a valid email address.');
-        recipient = to;
-      }
-      if (body.in_reply_to !== undefined && body.in_reply_to !== null) {
-        if (typeof body.in_reply_to !== 'string' || !/^[a-f0-9]{32}$/.test(body.in_reply_to))
-          return fail(400, 'invalid_reply', 'in_reply_to must be a transfer public id.');
-        const me = await accountIdentity(owner);
-        const original = me?.email
-          ? await db()
-              .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
-              .bind(body.in_reply_to, me.email)
-              .first<Transfer>()
-          : null;
-        if (!original)
-          return fail(404, 'invalid_reply', 'You can only reply to a transfer addressed to you.');
-        inReplyTo = original.public_id;
-        if (!recipient) {
-          const sender = await accountIdentity(original.owner);
-          if (!sender?.email)
-            return fail(409, 'sender_gone', 'The original sender no longer has an account. Set `to` explicitly.');
-          recipient = sender.email;
-        }
-      }
-      let price = 0;
-      if (body.price_cents !== undefined && body.price_cents !== null) {
-        if (!validPrice(body.price_cents))
-          return fail(400, 'invalid_price', 'price_cents must be an integer between 0 and 1,000,000.');
-        price = body.price_cents;
-        if (price > 0 && !recipient)
-          return fail(400, 'price_needs_recipient', 'A priced transfer must be addressed with `to`.');
-        if (price > 0 && owner.length === 64)
-          return fail(403, 'account_required', 'Priced transfers need an account token.');
-      }
-      // Only the purge runs inline; webhooks and pruning stay on the scheduled job.
-      await purgeExpired().catch(() => console.error('Inline purge failed'));
-      const id = crypto.randomUUID().replaceAll('-', ''),
-        publicId = crypto.randomUUID().replaceAll('-', ''),
-        now = Date.now();
-      // Free allowance or a charge from the balance. The owner test token is
-      // never charged; accounts pay the storage price once they are past the
-      // free storage or the free monthly count.
-      let charge = 0;
-      if (owner.length !== 64) {
-        const usage = await db()
-          .prepare(
-            `SELECT (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND (state<>'deleted' OR completed_at IS NOT NULL)) AS monthly,
-                    COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0) AS stored,
-                    (SELECT balance_cents FROM accounts WHERE id=?) AS balance`,
-          )
-          .bind(owner, now - MONTH, owner, owner)
-          .first<{ monthly: number; stored: number; balance: number }>();
-        const withinFree =
-          (usage?.monthly ?? 0) < limits.free_transfers_per_30_days &&
-          (usage?.stored ?? 0) + body.size_bytes <= limits.free_stored_bytes;
-        if (!withinFree) {
-          charge = quoteCents(body.size_bytes);
-          if ((usage?.balance ?? 0) < charge)
-            return fail(
-              402,
-              'insufficient_balance',
-              guest ? 'The requester needs to add credit before this file can be uploaded. Please contact them.' : `This transfer is outside your free allowance (${fileLabel(limits.free_stored_bytes)} stored, ${limits.free_transfers_per_30_days} transfers per 30 days) and costs ${(charge / 100).toFixed(2)} USD. Your balance is ${((usage?.balance ?? 0) / 100).toFixed(2)} USD. Add credit at ${u.origin}/account.`,
-            );
-        }
-      }
-      // Recheck free eligibility in the reservation: concurrent requests may
-      // have consumed it since the quote. A rejected request can retry for a paid quote.
-      // Reserve quota, the charge, and the record atomically BEFORE allocating any storage.
-      const results = await db().batch([
-        db()
-          .prepare(`INSERT INTO transfers (id,public_id,owner,filename,size,sender,recipient,in_reply_to,price_cents,charged_cents,state,created_at,expires_at,request_id)
-      SELECT ?,?,?,?,?,?,?,?,?,?,'initializing',?,?,? WHERE
-      (? IS NULL OR EXISTS(SELECT 1 FROM file_requests r WHERE r.id=? AND r.owner=? AND r.submitted_at IS NULL AND r.revoked_at IS NULL AND r.expires_at>?
-        AND ?<=r.max_file_bytes AND (SELECT COUNT(*) FROM transfers WHERE request_id=r.id)<r.max_files
-        AND COALESCE((SELECT SUM(size) FROM transfers WHERE request_id=r.id),0)+?<=r.max_total_bytes)) AND
-      (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL AND balance_cents>=?)) AND
-      (length(?)=64 OR ?>0 OR (
-        (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND (state<>'deleted' OR completed_at IS NOT NULL)) < ? AND
-        COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ?
-      )) AND
-      (SELECT count(*) FROM transfers WHERE owner=? AND state IN ('initializing','uploading','completing') AND purged_at IS NULL) < ? AND
-      COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ? RETURNING id`)
-          .bind(
-            id, publicId, owner, filename, body.size_bytes, body.sender || null, recipient, inReplyTo, price, charge,
-            now, now + DAY, guest?.id ?? null,
-            guest?.id ?? null, guest?.id ?? null, owner, now, body.size_bytes, body.size_bytes,
-            owner, owner, charge,
-            owner, charge, owner, now - MONTH, limits.free_transfers_per_30_days,
-            owner, body.size_bytes, limits.free_stored_bytes,
-            owner, limits.max_pending_uploads,
-            owner, body.size_bytes, limits.max_stored_bytes,
-          ),
-        db()
-          .prepare(`UPDATE accounts SET balance_cents=balance_cents-? WHERE id=? AND ?>0 AND EXISTS(SELECT 1 FROM transfers WHERE id=?)`)
-          .bind(charge, owner, charge, id),
-        db()
-          .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
-            SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'charge',?,?,? WHERE ?>0 AND EXISTS(SELECT 1 FROM transfers WHERE id=?)`)
-          .bind(crypto.randomUUID().replaceAll('-', ''), owner, -charge, owner, id, `Transfer of ${filename} (${fileLabel(body.size_bytes)})`, now, charge, id),
-      ]);
-      if (!results[0].results.length)
-        return fail(
-          429,
-          'account_limit',
-          guest ? 'The request is closed or its file, size, or account allowance has been reached. Contact the requester.' : `Limit reached: ${limits.max_pending_uploads} unfinished upload${limits.max_pending_uploads === 1 ? '' : 's'}, ${fileLabel(limits.max_stored_bytes)} reserved storage, or an insufficient balance.`,
-        );
-      let multi: R2MultipartUpload | undefined;
-      try {
-        multi = await bucket().createMultipartUpload(`transfers/${id}`, {
-          httpMetadata: { contentType: 'application/octet-stream' },
-        });
-        const activated = await db()
-          .prepare(
-            "UPDATE transfers SET state='uploading',upload_id=? WHERE id=? AND state='initializing' RETURNING id",
-          )
-          .bind(multi.uploadId, id)
-          .first();
-        if (!activated) {
-          await multi.abort();
-          return fail(410, 'deleted', 'The upload was revoked.');
-        }
-      } catch (e) {
-        await db()
-          .prepare(
-            "UPDATE transfers SET state='deleted',upload_id=?,filename='Deleted file',sender=NULL WHERE id=?",
-          )
-          .bind(multi?.uploadId || null, id)
-          .run();
-        throw e;
-      }
-      const t = await owned(id, owner);
-      return json(
-        guest ? dropTransfer(t) : { ...privateData(t, u.origin), upload_expires_at: iso(now + DAY) },
-        201,
-      );
-    }
+    if (p.length === 1 && method === 'POST') return await createTransfer(req, owner, guest, u.origin);
     if (p.length === 1 && method === 'GET') {
       const rows = (
         await db()
@@ -997,7 +1166,7 @@ export async function handleApi(req: Request) {
     }
     if (!/^[a-f0-9]{32}$/.test(p[1] || ''))
       return fail(404, 'not_found', 'Transfer not found.');
-    let t = await owned(p[1], owner);
+    const t = await owned(p[1], owner);
     if (guest && t.request_id !== guest.id) return fail(404, 'not_found', 'File not found in this request.');
     if (p.length === 2 && method === 'GET')
       return json({ ...(guest ? dropTransfer(t) : privateData(t, u.origin)), parts: await uploadParts(t) });
@@ -1016,166 +1185,9 @@ export async function handleApi(req: Request) {
     }
     if (t.state === 'deleted' || t.expires_at <= Date.now())
       return fail(410, 'expired', 'Transfer deleted or expired.');
-    if (p[2] === 'parts' && p.length === 4 && method === 'PUT') {
-      if (t.state !== 'uploading')
-        return fail(
-          409,
-          'invalid_state',
-          'Upload is already complete or being finalized.',
-        );
-      const n = Number(p[3]),
-        count = Math.ceil(t.size / PART_BYTES);
-      if (!Number.isInteger(n) || n < 1 || n > count)
-        return fail(400, 'invalid_part', 'Invalid part number.');
-      if (activeChunkRequests >= 2)
-        return fail(
-          429,
-          'upload_busy',
-          'Two chunks are already being processed. Retry shortly.',
-        );
-      activeChunkRequests++;
-      try {
-        const expected = Math.min(PART_BYTES, t.size - (n - 1) * PART_BYTES),
-          data = await boundedBody(req, expected);
-        if (data.byteLength !== expected)
-          return fail(
-            400,
-            'invalid_part_size',
-            `Expected ${expected} bytes for this part.`,
-          );
-        const hash = await sha256(data);
-        // Reserve an immutable chunk identity. Concurrent retries cannot replace it with different bytes.
-        const reserved = await db()
-          .prepare(`INSERT INTO parts (transfer_id,number,etag,size,content_hash)
-        SELECT ?,?,'',?,? WHERE EXISTS(SELECT 1 FROM transfers WHERE id=? AND state='uploading' AND expires_at>?)
-        ON CONFLICT(transfer_id,number) DO UPDATE SET etag=CASE WHEN parts.content_hash IS NULL THEN '' ELSE parts.etag END,content_hash=COALESCE(parts.content_hash,excluded.content_hash)
-        WHERE parts.content_hash IS NULL OR parts.content_hash=excluded.content_hash RETURNING etag,content_hash`)
-          .bind(t.id, n, data.byteLength, hash, t.id, Date.now())
-          .first<{ etag: string; content_hash: string }>();
-        if (!reserved)
-          return fail(
-            409,
-            'part_conflict',
-            'Transfer is no longer uploadable, or this part contains different bytes.',
-          );
-        if (reserved.etag)
-          return json({ part_number: n, size_bytes: data.byteLength });
-        const part = await bucket()
-          .resumeMultipartUpload(key(t), t.upload_id!)
-          .uploadPart(n, data);
-        const saved = await db()
-          .prepare(`UPDATE parts SET etag=? WHERE transfer_id=? AND number=? AND content_hash=? AND
-        EXISTS(SELECT 1 FROM transfers WHERE id=? AND state='uploading' AND expires_at>?) RETURNING number`)
-          .bind(part.etag, t.id, n, hash, t.id, Date.now())
-          .first();
-        if (!saved)
-          return fail(410, 'unavailable', 'The upload expired or was revoked.');
-        return json({ part_number: n, size_bytes: data.byteLength });
-      } finally {
-        activeChunkRequests--;
-      }
-    }
+    if (p[2] === 'parts' && p.length === 4 && method === 'PUT') return await uploadPart(req, t, p[3]);
 
-    if (p[2] === 'complete' && p.length === 3 && method === 'POST') {
-      if (t.state === 'complete') return json(guest ? dropTransfer(t) : privateData(t, u.origin));
-      const parts = await uploadParts(t);
-      if (
-        parts.length !== Math.ceil(t.size / PART_BYTES) ||
-        parts.some((p) => !p.etag) ||
-        parts.reduce((n, p) => n + p.size, 0) !== t.size
-      )
-        return fail(
-          409,
-          'incomplete',
-          'Upload every part before completing the transfer.',
-        );
-      let object = await bucket().head(key(t));
-      if (!object) {
-        const leaseUntil = Date.now() + 120_000;
-        const lock = await db()
-          .prepare(
-            "UPDATE transfers SET state='completing',completion_lock_until=? WHERE id=? AND (state='uploading' OR (state='completing' AND completion_lock_until<?))",
-          )
-          .bind(leaseUntil, t.id, Date.now())
-          .run();
-        if (!lock.meta.changes)
-          return fail(
-            409,
-            'completing',
-            'Completion is in progress. Poll status; retry completion if it remains pending.',
-          );
-        try {
-          object = await bucket()
-            .resumeMultipartUpload(key(t), t.upload_id!)
-            .complete(
-              parts.map((p) => ({ partNumber: p.number, etag: p.etag })),
-            );
-        } catch (e) {
-          if ((await owned(t.id, owner)).state === 'deleted')
-            return fail(410, 'deleted', 'The upload was revoked.');
-          await db()
-            .prepare(
-              "UPDATE transfers SET state='uploading' WHERE id=? AND state='completing' AND completion_lock_until=?",
-            )
-            .bind(t.id, leaseUntil)
-            .run();
-          throw e;
-        }
-      }
-      if (object.size !== t.size)
-        return fail(
-          409,
-          'size_mismatch',
-          'Stored file size did not match the declared size.',
-        );
-      const now = Date.now();
-      const hashes = parts.map((p) => p.content_hash);
-      const digest = hashes.every((h): h is string => !!h)
-        ? await contentHash(hashes)
-        : null;
-      const limits = LIMITS;
-      await db()
-        .prepare(
-          `UPDATE transfers SET state='complete',completed_at=?,expires_at=?,upload_id=NULL,content_hash=? WHERE id=? AND state IN ('uploading','completing') AND expires_at>?
-          AND (request_id IS NULL OR EXISTS(SELECT 1 FROM file_requests r JOIN accounts a ON a.id=r.owner
-            WHERE r.id=transfers.request_id AND r.submitted_at IS NULL AND r.revoked_at IS NULL AND r.expires_at>? AND a.deleted_at IS NULL))`,
-        )
-        .bind(now, now + limits.retention_ms, digest, t.id, now, now)
-        .run();
-      t = await owned(t.id, owner);
-      // Deletion can race completion; never revive a revoked transfer or keep its bytes.
-      if (t.state !== 'complete') {
-        await db()
-          .prepare('UPDATE transfers SET purged_at=NULL WHERE id=?')
-          .bind(t.id)
-          .run();
-        await removeBytes({ ...t, purged_at: null });
-        return fail(410, 'deleted', 'Transfer was deleted.');
-      }
-      await recordEvent(owner, 'transfer.completed', eventData(t, u.origin));
-      if (t.in_reply_to) {
-        const original = await db()
-          .prepare('SELECT owner FROM transfers WHERE public_id=?')
-          .bind(t.in_reply_to)
-          .first<{ owner: string }>();
-        if (original)
-          await recordEvent(original.owner, 'transfer.reply', {
-            public_id: t.public_id,
-            filename: t.filename,
-            size_bytes: t.size,
-            sender: t.sender,
-            from_account: await handleOf(owner),
-            in_reply_to: t.in_reply_to,
-            price_cents: t.price_cents,
-            content_hash: t.content_hash,
-            share_url: `${u.origin}/t/${t.public_id}`,
-            receipt_url: `${u.origin}/api/receipts/${t.public_id}`,
-            completed_at: iso(t.completed_at),
-            expires_at: iso(t.expires_at),
-          });
-      }
-      return json(guest ? dropTransfer(t) : privateData(t, u.origin));
-    }
+    if (p[2] === 'complete' && p.length === 3 && method === 'POST') return await completeTransfer(t, owner, guest, u.origin);
     if (p[2] === 'sent' && p.length === 3 && method === 'POST') {
       if (t.state !== 'complete')
         return fail(

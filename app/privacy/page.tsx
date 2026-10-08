@@ -1,5 +1,6 @@
 /* oxlint-disable next/no-html-link-for-pages */
 import { Brand } from '../brand';
+import { MobileNav } from '../mobile-nav';
 import { OPERATOR, contactLine, legalIsDraft } from '@/lib/legal';
 export const metadata = { title: 'Privacy — Bilaga' };
 const sections = [
@@ -37,18 +38,12 @@ export default function Privacy() {
     <main className="shell">
       <header className="site-header">
         <Brand />
-        <input type="checkbox" id="nav-toggle" className="nav-toggle" />
-        <label htmlFor="nav-toggle" className="nav-burger" aria-label="Menu">
-          <span />
-          <span />
-          <span />
-        </label>
-        <nav className="nav-collapsible">
+        <MobileNav>
           <a href="/">Send a file</a>
           <a href="/account">Account</a>
           <a href="/docs">For agents</a>
           <a href="/terms">Terms</a>
-        </nav>
+        </MobileNav>
       </header>
       <article className="docs-content">
         <p className="eyebrow">{legalIsDraft() ? 'DRAFT' : 'PRIVACY'}</p>
