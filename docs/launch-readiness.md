@@ -2,6 +2,23 @@
 
 Migration `0011_drop_waitlist.sql` drops the `waitlist` table (unused since the homepage replaced the waitlist) and the ignored `accounts.uploads_enabled` column; `lib/accounts.ts` no longer writes it. Plain `DROP TABLE` / `DROP COLUMN`, so `d1 migrations apply --remote` works. Export the waitlist rows first if anyone still wants them, and deploy the Worker together with the migration: the previous Worker's account-deletion UPDATE references the dropped column.
 
+# Code review fixes and Product Hunt badge removal — deployed 8 October 2026
+
+Worker version 649fef3d (commits 660f3f4 and 967addc). No migrations. The schema cleanup above (0b6e3ba, migration 0011) came after this deploy and is not in it.
+
+- Product Hunt badge removed from the home page, with its CSS and the `api.producthunt.com` CSP `img-src` entry.
+- Billing: deleted transfers that had completed now count toward the monthly free allowance (deleting no longer resets it). Paying for your own transfer is rejected (`own_transfer`), so purchased credit can't become non-expiring sale credit.
+- Uploads: transfer creation runs only the expired-file purge inline, not the full cleanup with webhook delivery, and a purge failure no longer fails the upload. Completion requires the upload window to still be open, so cleanup can't delete a transfer that was just charged.
+- Downloads: an `Authorization` header is checked before the R2 object is opened. A bad token still gets 401 by design (tests/network.py).
+- Recipient page: the free limit now reads 5 GB stored (it said 1 GB); the paid-download button points to /docs instead of /account, which had no pay button.
+- Verify page and `GET /api/webhook`: list `request.submitted` and the file-request receipt fields (`request_id`, `requester_account`).
+- Account pages: one shared `sessionRequest` helper, so a non-JSON error page no longer shows "Unexpected token". Closing a request hides its stale file list.
+- Mobile menu (shared `MobileNav` on /, /terms, /privacy) closes when a link is tapped.
+- Removed: the unreachable `app/api/[...path]/route.ts`, `db/index.ts`, the matching duplicate guards in `proxy.ts` (`worker.ts` handles all /api, non-GET and server-action requests first), and the experimental `document.modelContext` tool in the upload panel. `handleApi` split into `stripeWebhook`, `balance`, `inboxRoutes`, `createTransfer`, `uploadPart` and `completeTransfer` (moved, not changed).
+- Checks before deploy: lint, typecheck, test:client, test:billing, MCP tests, and the integration (43), security, requests (94), accounts (38), network (82), credit-lots, interrupted-upload and scheduled suites against a freshly restarted local built Worker. After deploy: /, /account, /docs, /mcp, /verify, /terms, /privacy, /og.png, /favicon.svg, /llms.txt and /api/config all 200; no Product Hunt markup in the live home page; `POST /` 405; `/api/inbox` without a token 401. A live /t/ page was not checked.
+
+**bilaga-mcp 0.2.1 published to npm (8 October 2026).** Resume matches the server's NFC-normalised, trimmed filename (names like "Malmö.mov" no longer fail). `download_file` writes to `<out>.part` and renames on success, so a dropped download leaves no truncated file. `setup` prints `claude mcp add -s user`. The version comes from package.json (the user agent said 0.1, the server said 0.2.0). Verified: the registry's `latest` is 0.2.1, and `npx -y bilaga-mcp@0.2.1` answers `initialize` with version 0.2.1. The npm token that was in `~/.npmrc` had expired; publishing used browser sign-in.
+
 # Brand refresh and Product Hunt launch prep — deployed 17 September 2026
 
 Worker version 8bc35729 (preceded the same day by 14ebef59). No migrations. Product Hunt launch is scheduled for 18 September 2026 (GPT-6 Astra Challenge), publishing 12:01 AM Pacific.
