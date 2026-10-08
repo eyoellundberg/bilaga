@@ -5,12 +5,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { BilagaClient, BilagaError } from './client.js';
+import { BilagaClient, BilagaError, VERSION } from './client.js';
 import { loadToken, runSetup, tokenPath } from './setup.js';
 
 export function createServer(client) {
   const server = new McpServer(
-    { name: 'bilaga', version: '0.2.0' },
+    { name: 'bilaga', version: VERSION },
     {
       instructions: [
         'Bilaga sends large files (up to 50 GB) and returns a share link valid for 30 days.',

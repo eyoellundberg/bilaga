@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { BilagaClient } from '../src/client.js';
+import { BilagaClient, VERSION } from '../src/client.js';
 import { createServer } from '../src/index.js';
 
 const PART = 1024; // small part size so the test file needs several parts
@@ -96,7 +96,7 @@ test('send_file uploads all parts, retries a flaky part, and returns share_url',
     assert.equal(t.to, 'a@b.co');
     assert.deepEqual(t.parts.map((p) => p.number), [1, 2, 3]);
     assert.ok(Buffer.concat(t.data).equals(bytes), 'server received identical bytes');
-    assert.equal(state.calls.every((c) => c.ua === 'Bilaga-MCP/0.1'), true);
+    assert.equal(state.calls.every((c) => c.ua === `Bilaga-MCP/${VERSION}`), true);
     assert.equal(state.calls.filter((c) => c.path.endsWith('/parts/1')).length, 2, 'part 1 retried after 503');
   } finally {
     await close();

@@ -4,8 +4,10 @@ import { open, rename, rm } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { createHash } from 'node:crypto';
 import { basename, resolve } from 'node:path';
+import { createRequire } from 'node:module';
 
-const USER_AGENT = 'Bilaga-MCP/0.1';
+export const VERSION = createRequire(import.meta.url)('../package.json').version;
+const USER_AGENT = `Bilaga-MCP/${VERSION}`;
 
 export class BilagaError extends Error {
   constructor(status, body) {
