@@ -53,7 +53,7 @@ export async function runSetup(argToken) {
   writeFileSync(tokenPath(), token + '\n', { mode: 0o600 });
   out.write(`\nSaved. Token check against ${base}: ${res.ok ? 'ok' : `HTTP ${res.status}`}.\n\n`);
   out.write('Now add the server to your client. Claude Code:\n\n');
-  out.write('  claude mcp add bilaga -- npx -y bilaga-mcp\n\n');
+  out.write('  claude mcp add -s user bilaga -- npx -y bilaga-mcp\n\n');
   out.write('Claude Desktop, Cursor and other JSON configs:\n\n');
   out.write('  { "mcpServers": { "bilaga": { "command": "npx", "args": ["-y", "bilaga-mcp"] } } }\n\n');
   out.write('To change the token later, run `npx -y bilaga-mcp setup` again' + '.\n');

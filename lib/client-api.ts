@@ -42,6 +42,17 @@ export async function request<T>(
   return response.json() as Promise<T>;
 }
 
+// Same-origin calls authenticated by the session cookie (account pages).
+export async function sessionRequest<T>(path: string, method = 'GET', body?: object): Promise<T> {
+  const init: RequestInit = { method, credentials: 'same-origin' };
+  if (body) init.headers = { 'Content-Type': 'application/json' };
+  if (body) init.body = JSON.stringify(body);
+  const res = await fetch(`/api/${path}`, init);
+  const data = (await res.json().catch(() => null)) as (T & { error?: { message?: string } }) | null;
+  if (!res.ok || !data) throw new Error(data?.error?.message || 'Please try again.');
+  return data;
+}
+
 function wait(delay: number, signal: AbortSignal) {
   signal.throwIfAborted();
   return new Promise<void>((resolve, reject) => {

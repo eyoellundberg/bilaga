@@ -1,16 +1,13 @@
 import { requestRoutes } from './requests';
 import { creditSummary } from './credits';
 import { env } from 'cloudflare:workers';
-import { sha256 } from './hash';
+import { randomHex, sha256 } from './hash';
 import { bodyJson, fail, json } from './http';
-import { DAY, describeLimits } from './rules';
+import { DAY, EMAIL, describeLimits } from './rules';
 import { createCheckout, stripeConfigured } from './stripe';
 
 const db = () => env.DB;
-const random = () =>
-  Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
-    b.toString(16).padStart(2, '0'),
-  ).join('');
+const random = () => randomHex(32);
 const hash = (s: string) => sha256(new TextEncoder().encode(s));
 const settings = () =>
   env as unknown as {
@@ -249,7 +246,7 @@ export async function accountRoutes(
       typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
     if (
       email.length > 254 ||
-      !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i.test(
+      !EMAIL.test(
         email,
       )
     )

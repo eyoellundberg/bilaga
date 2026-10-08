@@ -1,9 +1,10 @@
 'use client';
 import { gbLabel, type describeLimits } from '@/lib/rules';
 /* oxlint-disable next/no-html-link-for-pages */
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Brand } from '../brand';
 import { RequestManager } from './request-manager';
+import { sessionRequest } from '@/lib/client-api';
 
 type Account = {
   email: string;
@@ -19,10 +20,8 @@ type Account = {
   top_ups: 'stripe_checkout' | 'unavailable';
   tokens: { id: string; label: string; created_at: number }[];
 };
-const setupCommand = (token: string) =>
-  `npx -y bilaga-mcp setup ${token} && claude mcp add -s user bilaga -- npx -y bilaga-mcp`;
-const codexSetupCommand = (token: string) =>
-  `npx -y bilaga-mcp setup ${token} && codex mcp add bilaga -- npx -y bilaga-mcp`;
+const setupCommand = (add: string, token: string) =>
+  `npx -y bilaga-mcp setup ${token} && ${add} bilaga -- npx -y bilaga-mcp`;
 export default function AccountPage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [email, setEmail] = useState('');
@@ -34,21 +33,8 @@ export default function AccountPage() {
   const [busy, setBusy] = useState(true);
   const [methods, setMethods] = useState<{ email: boolean; google: boolean }>({ email: true, google: false });
   const [lastUsed, setLastUsed] = useState<'email' | 'google' | ''>('');
-  async function api<T = { message: string; token: string }>(
-    path: string,
-    method: string = 'GET',
-    body?: object,
-  ) {
-    const res = await fetch(`/api/${path}`, {
-      method,
-      credentials: 'same-origin',
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const data = (await res.json()) as T & { error?: { message?: string } };
-    if (!res.ok) throw new Error(data.error?.message || 'Please try again.');
-    return data;
-  }
+  const api = <T = { message: string; token: string },>(path: string, method = 'GET', body?: object) =>
+    sessionRequest<T>(path, method, body);
   useEffect(() => {
     const readLogin = () => {
       const token = new URLSearchParams(location.hash.slice(1)).get('login');
@@ -300,48 +286,37 @@ export default function AccountPage() {
                     Shown only once. Store this token in your agent’s secure
                     settings.
                   </p>
-                  <code className="token-value">{agentToken}</code>
-                  <button
-                    className="account-button"
-                    onClick={() =>
-                      act(async () => {
-                        await navigator.clipboard.writeText(agentToken);
-                        setMessage('Token copied.');
-                      })
-                    }
-                  >
-                    Copy token
-                  </button>
-                  <p>
-                    Using Codex? Paste this one line in a terminal and you are
-                    done. It stores the token on your machine and adds the
-                    Bilaga MCP server.
-                  </p>
-                  <code className="token-value">{codexSetupCommand(agentToken)}</code>
-                  <button
-                    className="account-button"
-                    onClick={() =>
-                      act(async () => {
-                        await navigator.clipboard.writeText(codexSetupCommand(agentToken));
-                        setMessage('Setup command copied.');
-                      })
-                    }
-                  >
-                    Copy Codex command
-                  </button>
-                  <p>Using Claude Code? Same idea:</p>
-                  <code className="token-value">{setupCommand(agentToken)}</code>
-                  <button
-                    className="account-button"
-                    onClick={() =>
-                      act(async () => {
-                        await navigator.clipboard.writeText(setupCommand(agentToken));
-                        setMessage('Setup command copied.');
-                      })
-                    }
-                  >
-                    Copy Claude Code command
-                  </button>
+                  {[
+                    { intro: null, text: agentToken, label: 'Copy token', copied: 'Token copied.' },
+                    {
+                      intro: 'Using Codex? Paste this one line in a terminal and you are done. It stores the token on your machine and adds the Bilaga MCP server.',
+                      text: setupCommand('codex mcp add', agentToken),
+                      label: 'Copy Codex command',
+                      copied: 'Setup command copied.',
+                    },
+                    {
+                      intro: 'Using Claude Code? Same idea:',
+                      text: setupCommand('claude mcp add -s user', agentToken),
+                      label: 'Copy Claude Code command',
+                      copied: 'Setup command copied.',
+                    },
+                  ].map(({ intro, text, label, copied }) => (
+                    <Fragment key={label}>
+                      {intro && <p>{intro}</p>}
+                      <code className="token-value">{text}</code>
+                      <button
+                        className="account-button"
+                        onClick={() =>
+                          act(async () => {
+                            await navigator.clipboard.writeText(text);
+                            setMessage(copied);
+                          })
+                        }
+                      >
+                        {label}
+                      </button>
+                    </Fragment>
+                  ))}
                   <button
                     className="account-button secondary"
                     onClick={() => setAgentToken('')}

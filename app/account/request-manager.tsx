@@ -2,19 +2,14 @@
 /* oxlint-disable next/no-html-link-for-pages */
 import { useEffect, useState } from 'react';
 import { fileLabel } from '@/lib/rules';
+import { sessionRequest } from '@/lib/client-api';
 
 type Item = { id: string; title: string; status: string; reference: string | null; submitted_at: string | null };
 type Detail = Item & {
   uploader_email: string | null;
   files: { id: string; public_id: string; filename: string; size: number; state: string }[];
 };
-async function api<T>(path = '', method: string = 'GET', body?: object): Promise<T> {
-  const res = await fetch(`/api/account/requests${path}`, { method, credentials: 'same-origin',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
-  const data = await res.json() as T & { error?: { message?: string } };
-  if (!res.ok) throw new Error(data.error?.message || 'Please try again.');
-  return data;
-}
+const api = <T,>(path = '', method = 'GET', body?: object) => sessionRequest<T>(`account/requests${path}`, method, body);
 export function RequestManager() {
   const [items, setItems] = useState<Item[]>([]);
   const [title, setTitle] = useState('');
@@ -24,7 +19,7 @@ export function RequestManager() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [busy, setBusy] = useState(false);
   const refresh = () => api<{ requests: Item[] }>().then(data => setItems(data.requests));
-  useEffect(() => { void api<{ requests: Item[] }>().then(data => setItems(data.requests)).catch(e => setMessage(e.message)); }, []);
+  useEffect(() => { refresh().catch(e => setMessage(e.message)); }, []);
   async function act(fn: () => Promise<void>) {
     setBusy(true); setMessage('');
     try { await fn(); } catch (e) { setMessage((e as Error).message); } finally { setBusy(false); }
@@ -52,7 +47,7 @@ export function RequestManager() {
     {items.length > 0 && <ul>{items.map(item => <li key={item.id} style={{ marginBottom: 12 }}>
       <strong>{item.title}</strong> · {item.status}{item.submitted_at ? ` · ${new Date(item.submitted_at).toLocaleString()}` : ''}
       <button className="account-button secondary" disabled={busy} style={{ marginLeft: 12 }} onClick={() => void act(async () => setDetail(await api<Detail>(`/${item.id}`)))}>View files</button>
-      {item.status === 'open' && <button className="account-button secondary" disabled={busy} onClick={() => void act(async () => { await api(`/${item.id}`, 'DELETE'); await refresh(); })}>Close request</button>}
+      {item.status === 'open' && <button className="account-button secondary" disabled={busy} onClick={() => void act(async () => { await api(`/${item.id}`, 'DELETE'); if (detail?.id === item.id) setDetail(null); await refresh(); })}>Close request</button>}
     </li>)}</ul>}
     {detail && <div className="notice">
       <h3>{detail.title}</h3>

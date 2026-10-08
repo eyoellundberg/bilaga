@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { sha256 } from './hash';
+import { hex, sha256 } from './hash';
 
 // Receipts are signed with an Ed25519 key held only by the Worker. Anyone can
 // verify one offline with the published public key; nothing here trusts the UI.
@@ -14,13 +14,11 @@ let cached: Promise<{ key: CryptoKey; publicKey: string; keyId: string } | null>
 
 function base64urlToHex(value: string) {
   const bin = atob(value.replace(/-/g, '+').replace(/_/g, '/'));
-  return Array.from(bin, (c) => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+  return hex(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
 }
 function hexToBytes(hex: string) {
   return Uint8Array.from(hex.match(/../g) || [], (b) => parseInt(b, 16));
 }
-export const toHex = (bytes: ArrayBuffer | Uint8Array) =>
-  Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, '0')).join('');
 
 async function load() {
   const raw = settings().RECEIPT_SIGNING_KEY;
@@ -66,7 +64,7 @@ export async function signPayload<K extends string>(kind: K, payload: Record<str
   const signature = await crypto.subtle.sign({ name: 'Ed25519' }, s.key, message);
   return {
     [kind]: payload,
-    signature_hex: toHex(signature),
+    signature_hex: hex(signature),
     key_id: s.keyId,
     public_key_hex: s.publicKey,
     algorithm: SIGNATURE_ALGORITHM,

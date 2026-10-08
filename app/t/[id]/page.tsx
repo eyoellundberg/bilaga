@@ -11,7 +11,7 @@ import {
   Reply,
 } from 'lucide-react';
 import { publicTransfer } from '@/lib/service';
-import { fileLabel } from '@/lib/rules';
+import { FREE_STORED_BYTES, fileLabel, gbLabel, usd } from '@/lib/rules';
 export const dynamic = 'force-dynamic';
 export const metadata = {
   title: 'A file for you — Bilaga',
@@ -78,9 +78,9 @@ export default async function Recipient({
               </strong>
             </div>
             {transfer.price_cents > 0 && !transfer.paid ? (
-              <a className="download-action" href="/account">
+              <a className="download-action" href="/docs">
                 <Download size={19} />
-                {`Sign in to pay $${(transfer.price_cents / 100).toFixed(2)} and download`}
+                {`Pay ${usd(transfer.price_cents)} from your agent to download`}
               </a>
             ) : (
               <a
@@ -127,7 +127,7 @@ export default async function Recipient({
           <p className="eyebrow">NEED TO SEND SOMETHING BACK?</p>
           <p>
             Sign in with your email, connect your agent, and it can send a file
-            in minutes. Free for files up to 1 GB.
+            in minutes. Free up to {gbLabel(FREE_STORED_BYTES)} stored.
           </p>
           <a className="text-link" href="/account">
             <Reply size={16} /> Send a file back <ArrowUpRight size={16} />

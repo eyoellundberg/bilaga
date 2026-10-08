@@ -26,7 +26,7 @@ export function proxy(request: NextRequest) {
         `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`,
         "script-src-attr 'none'",
         "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data: https://api.producthunt.com",
+        "img-src 'self' data:",
         "font-src 'self'",
         `connect-src 'self'${dev ? ' ws: wss:' : ''}`,
         "object-src 'none'",

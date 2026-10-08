@@ -30,6 +30,7 @@ export const choosePackMessage = () => `Choose ${TOP_UP_PACKS.map((p) => `${p.na
 export const describePacks = () =>
   TOP_UP_PACKS.map((p) => `${p.name} is ${usd(p.amount_cents)} for ${usd(p.credit_cents)} of credit (up to ${p.up_to_gb} GB)`).join('; ') +
   `. Paid once, valid for ${CREDIT_VALIDITY_YEARS} years.`;
+export const EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i;
 export const LIMITS = {
   max_file_bytes: MAX_BYTES,
   retention_ms: RETENTION,
@@ -38,8 +39,7 @@ export const LIMITS = {
   free_stored_bytes: FREE_STORED_BYTES,
   free_transfers_per_30_days: FREE_MONTHLY_TRANSFERS,
 };
-export type Limits = typeof LIMITS;
-export function describeLimits(l: Limits = LIMITS) {
+export function describeLimits(l = LIMITS) {
   return {
     max_file_bytes: l.max_file_bytes,
     max_stored_bytes: l.max_stored_bytes,

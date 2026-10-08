@@ -1,6 +1,6 @@
 // Minimal Bilaga HTTP client used by the MCP server. No dependencies.
-import { statSync, createWriteStream } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { statSync, createWriteStream, existsSync } from 'node:fs';
+import { open, rename, rm } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { createHash } from 'node:crypto';
 import { basename, resolve } from 'node:path';
@@ -100,7 +100,8 @@ export class BilagaClient {
     let transfer;
     if (resume) {
       transfer = await this.api(`transfers/${encodeURIComponent(resume)}`);
-      if (transfer.filename !== basename(abs) || transfer.size_bytes !== size) {
+      // The server stores names NFC-normalized and trimmed (lib/rules.ts cleanFilename).
+      if (transfer.filename !== basename(abs).normalize('NFC').trim() || transfer.size_bytes !== size) {
         throw new Error('Resume requires the same file name and size. Do not modify the file between attempts.');
       }
     } else {
@@ -159,21 +160,28 @@ export class BilagaClient {
     const star = disposition.match(/filename\*=UTF-8''([^;]+)/);
     if (star) name = decodeURIComponent(star[1]);
     const out = resolve(outPath ?? basename(name ?? publicId));
-    const flags = overwrite ? 'w' : 'wx';
+    if (!overwrite && existsSync(out)) throw new Error(`${out} already exists. Pass overwrite to replace it.`);
+    // Write beside the target and rename at the end, so a dropped download never leaves a truncated file.
+    const part = `${out}.part`;
     const hash = createHash('sha256');
     let sizeBytes = 0;
-    const sink = createWriteStream(out, { flags });
-    await pipeline(
-      res.body,
-      async function* (source) {
-        for await (const chunk of source) {
-          hash.update(chunk);
-          sizeBytes += chunk.length;
-          yield chunk;
-        }
-      },
-      sink,
-    );
+    try {
+      await pipeline(
+        res.body,
+        async function* (source) {
+          for await (const chunk of source) {
+            hash.update(chunk);
+            sizeBytes += chunk.length;
+            yield chunk;
+          }
+        },
+        createWriteStream(part),
+      );
+      await rename(part, out);
+    } catch (e) {
+      await rm(part, { force: true });
+      throw e;
+    }
     return { saved: out, size_bytes: sizeBytes, sha256: hash.digest('hex'), public_id: publicId };
   }
 }

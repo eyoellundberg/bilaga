@@ -1,3 +1,4 @@
+// Self-contained so tests/billing.test.mjs can load it directly in Node.
 const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
 // Stripe-Signature: t=<unix>,v1=<hmac-sha256(secret, `${t}.${body}`)>[,v1=...]
 export async function verifySignature(secret: string | undefined, header: string | null, body: string, toleranceMs = 5 * 60_000) {

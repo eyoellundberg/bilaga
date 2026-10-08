@@ -17,6 +17,7 @@ import {
   PART_BYTES,
   DAY,
   LIMITS,
+  EMAIL,
   MONTH,
   describeLimits,
   feeCents,
@@ -66,7 +67,6 @@ type Transfer = {
   request_id: string | null;
 };
 type AccountIdentity = { id: string; email: string | null; handle: string | null };
-const EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i;
 async function accountIdentity(id: string | null): Promise<AccountIdentity | null> {
   if (!id || id.length === 64) return null;
   return (
@@ -128,16 +128,6 @@ async function rateLimit(scope: string, limit: number, window = 60_000) {
       'rate_limited',
       'Too many requests. Wait a minute before retrying.',
     );
-}
-// One tier for everyone. The lookup still confirms the account is live.
-async function limitsFor(owner: string) {
-  if (owner.length === 64) return LIMITS;
-  const account = await db()
-    .prepare('SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL')
-    .bind(owner)
-    .first();
-  if (!account) return fail(401, 'unauthorized', 'A valid Bilaga token is required.');
-  return LIMITS;
 }
 // Settle a priced transfer inside one D1 batch. Every statement is guarded by
 // the same condition, so either all of it applies or none of it does.
@@ -343,7 +333,8 @@ async function removeBytes(t: Transfer) {
       .bind(Date.now(), t.id),
   ]);
 }
-export async function cleanup() {
+// Purge expired and deleted bytes so storage totals stay accurate.
+async function purgeExpired() {
   const expired = (
     await db()
       .prepare(
@@ -361,6 +352,10 @@ export async function cleanup() {
       console.error('Expiry cleanup needs retry');
     }
   }
+  return removed;
+}
+export async function cleanup() {
+  const removed = await purgeExpired();
   await db()
     .prepare(
       'DELETE FROM rate_limits WHERE scope IN (SELECT scope FROM rate_limits WHERE reset_at<? LIMIT 100)',
@@ -506,6 +501,9 @@ async function download(req: Request, id: string) {
         headers: { 'Content-Range': `bytes */${t.size}` },
       });
   }
+  // A recipient's agent downloading with its own token records who received it.
+  // Checked before opening the object so a rejected token leaves no open body.
+  const bearer = req.headers.has('Authorization') ? await accountIdentity(await authorize(req)) : null;
   const object = await bucket().get(
     key(t),
     range ? { range: { offset, length: end - offset + 1 } } : undefined,
@@ -515,8 +513,6 @@ async function download(req: Request, id: string) {
   headers.set('Content-Length', String(end - offset + 1));
   headers.set('ETag', object.httpEtag);
   if (range) headers.set('Content-Range', `bytes ${offset}-${end}/${t.size}`);
-  // A recipient's agent downloading with its own token records who received it.
-  const bearer = req.headers.has('Authorization') ? await accountIdentity(await authorize(req)) : null;
   const allowed = await db()
     .prepare(
       "UPDATE transfers SET download_requests=download_requests+1,last_download_at=? WHERE id=? AND state='complete' AND expires_at>? RETURNING download_requests",
@@ -772,6 +768,7 @@ export async function handleApi(req: Request) {
         if (!t) return fail(404, 'not_found', 'No transfer addressed to you has that id.');
         if (t.expires_at <= Date.now()) return fail(410, 'expired', 'This transfer has expired.');
         if (t.price_cents === 0) return fail(409, 'not_priced', 'This transfer is free.');
+        if (t.owner === me.id) return fail(409, 'own_transfer', 'You cannot pay for your own transfer.');
         if (t.paid_at) {
           if (t.paid_by !== me.id) return fail(409, 'already_paid', 'Someone else already paid for this transfer.');
         } else {
@@ -806,7 +803,7 @@ export async function handleApi(req: Request) {
     if (p[0] !== 'transfers')
       return fail(404, 'not_found', 'Endpoint not found.');
     if (p.length === 1 && method === 'POST') {
-      const limits = await limitsFor(owner);
+      const limits = LIMITS;
       if (
         req.headers.get('Content-Type')?.split(';')[0].trim() !==
         'application/json'
@@ -885,7 +882,8 @@ export async function handleApi(req: Request) {
         if (price > 0 && owner.length === 64)
           return fail(403, 'account_required', 'Priced transfers need an account token.');
       }
-      await cleanup();
+      // Only the purge runs inline; webhooks and pruning stay on the scheduled job.
+      await purgeExpired().catch(() => console.error('Inline purge failed'));
       const id = crypto.randomUUID().replaceAll('-', ''),
         publicId = crypto.randomUUID().replaceAll('-', ''),
         now = Date.now();
@@ -896,7 +894,7 @@ export async function handleApi(req: Request) {
       if (owner.length !== 64) {
         const usage = await db()
           .prepare(
-            `SELECT (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND state<>'deleted') AS monthly,
+            `SELECT (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND (state<>'deleted' OR completed_at IS NOT NULL)) AS monthly,
                     COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0) AS stored,
                     (SELECT balance_cents FROM accounts WHERE id=?) AS balance`,
           )
@@ -927,7 +925,7 @@ export async function handleApi(req: Request) {
         AND COALESCE((SELECT SUM(size) FROM transfers WHERE request_id=r.id),0)+?<=r.max_total_bytes)) AND
       (length(?)=64 OR EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL AND balance_cents>=?)) AND
       (length(?)=64 OR ?>0 OR (
-        (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND state<>'deleted') < ? AND
+        (SELECT count(*) FROM transfers WHERE owner=? AND created_at>? AND (state<>'deleted' OR completed_at IS NOT NULL)) < ? AND
         COALESCE((SELECT SUM(size) FROM transfers WHERE owner=? AND purged_at IS NULL),0)+? <= ?
       )) AND
       (SELECT count(*) FROM transfers WHERE owner=? AND state IN ('initializing','uploading','completing') AND purged_at IS NULL) < ? AND
@@ -1135,14 +1133,14 @@ export async function handleApi(req: Request) {
       const digest = hashes.every((h): h is string => !!h)
         ? await contentHash(hashes)
         : null;
-      const limits = await limitsFor(owner);
+      const limits = LIMITS;
       await db()
         .prepare(
-          `UPDATE transfers SET state='complete',completed_at=?,expires_at=?,upload_id=NULL,content_hash=? WHERE id=? AND state IN ('uploading','completing')
+          `UPDATE transfers SET state='complete',completed_at=?,expires_at=?,upload_id=NULL,content_hash=? WHERE id=? AND state IN ('uploading','completing') AND expires_at>?
           AND (request_id IS NULL OR EXISTS(SELECT 1 FROM file_requests r JOIN accounts a ON a.id=r.owner
             WHERE r.id=transfers.request_id AND r.submitted_at IS NULL AND r.revoked_at IS NULL AND r.expires_at>? AND a.deleted_at IS NULL))`,
         )
-        .bind(now, now + limits.retention_ms, digest, t.id, now)
+        .bind(now, now + limits.retention_ms, digest, t.id, now, now)
         .run();
       t = await owned(t.id, owner);
       // Deletion can race completion; never revive a revoked transfer or keep its bytes.

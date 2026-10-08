@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { bodyJson, fail, json } from './http';
-import { sha256 } from './hash';
-import { MAX_BYTES, MAX_STORED_BYTES, PART_BYTES } from './rules';
+import { randomHex, sha256 } from './hash';
+import { EMAIL, MAX_BYTES, MAX_STORED_BYTES, PART_BYTES } from './rules';
 import { CONTENT_HASH_ALGORITHM, signPayload } from './receipts';
 import { eventId } from './events';
 
@@ -51,7 +51,7 @@ export async function submitRequest(req: Request, r: FileRequest) {
   assertRequestOpen(r);
   const body = await bodyJson(req);
   const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
-  if (email.length > 254 || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i.test(email))
+  if (email.length > 254 || !EMAIL.test(email))
     return fail(400, 'invalid_email', 'Enter your email address.');
   const now = Date.now(), id = eventId(now);
   // Freeze the file manifest and enqueue exactly one event in the SAME batch.
@@ -99,7 +99,7 @@ export async function requestRoutes(req: Request, path: string[], owner: string)
     const maxFile = integer(body.max_file_bytes, Math.min(maxTotal, MAX_BYTES), Math.min(maxTotal, MAX_BYTES), 'max_file_bytes');
     const lifetime = integer(body.expires_in_seconds, 7 * 86400, 30 * 86400, 'expires_in_seconds');
     const id = crypto.randomUUID().replaceAll('-', '');
-    const token = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
+    const token = randomHex(32);
     const now = Date.now();
     const result = await db().prepare(`INSERT INTO file_requests
       (id,owner,token_hash,title,description,reference,max_files,max_file_bytes,max_total_bytes,created_at,expires_at)

@@ -1,3 +1,4 @@
+import { randomHex } from './hash';
 import { env } from 'cloudflare:workers';
 import { bodyJson, fail, json } from './http';
 import { DAY } from './rules';
@@ -23,21 +24,20 @@ type EventRow = {
   delivered_at: number | null;
   last_status: number | null;
 };
-export type EventType =
-  | 'request.submitted'
-  | 'transfer.completed'
-  | 'transfer.downloaded'
-  | 'transfer.received'
-  | 'transfer.reply'
-  | 'transfer.paid'
-  | 'transfer.deleted';
+const EVENT_TYPES = [
+  'request.submitted',
+  'transfer.completed',
+  'transfer.downloaded',
+  'transfer.received',
+  'transfer.reply',
+  'transfer.paid',
+  'transfer.deleted',
+] as const;
+export type EventType = (typeof EVENT_TYPES)[number];
 
 // Time-ordered ids let GET /api/events?since=ID page without a second column.
 export function eventId(now: number) {
-  const random = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) =>
-    b.toString(16).padStart(2, '0'),
-  ).join('');
-  return `evt_${now.toString(16).padStart(12, '0')}${random}`;
+  return `evt_${now.toString(16).padStart(12, '0')}${randomHex(8)}`;
 }
 export async function recordEvent(
   accountId: string,
@@ -228,7 +228,7 @@ export async function eventRoutes(
           delivered: !!r.delivered_at,
           next_attempt_at: r.next_attempt_at ? new Date(r.next_attempt_at).toISOString() : null,
         })),
-        events: ['transfer.completed', 'transfer.downloaded', 'transfer.received', 'transfer.reply', 'transfer.paid', 'transfer.deleted'],
+        events: EVENT_TYPES,
       });
     }
     if (req.method === 'PUT') {

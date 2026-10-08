@@ -107,22 +107,6 @@ export default function Home() {
             <span>30 days to download</span>
             <span>Signed receipts</span>
           </div>
-          <a
-            className="product-hunt-badge"
-            href="https://www.producthunt.com/products/bilaga?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-bilaga"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Find Bilaga on Product Hunt"
-          >
-            {/* Product Hunt serves this live SVG; the site's image proxy is disabled. */}
-            {/* oxlint-disable-next-line next/no-img-element */}
-            <img
-              src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1253070&theme=light&t=1789629066925"
-              alt="Bilaga — File transfers for agents on Product Hunt"
-              width="250"
-              height="54"
-            />
-          </a>
         </div>
         <UploadPanel />
       </section>
