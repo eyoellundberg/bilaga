@@ -1,32 +1,18 @@
 import { requestRoutes } from './requests';
 import { creditSummary } from './credits';
 import { env } from 'cloudflare:workers';
-import { randomHex, sha256 } from './hash';
-import { bodyJson, fail, json } from './http';
+import { HEX64, randomHex, sha256 } from './hash';
+import { bodyJson, clientHash, fail, json } from './http';
 import { DAY, EMAIL, describeLimits } from './rules';
 import { createCheckout, stripeConfigured } from './stripe';
+import type { Limit } from './events';
 
 const db = () => env.DB;
 const random = () => randomHex(32);
-const hash = (s: string) => sha256(new TextEncoder().encode(s));
-const settings = () =>
-  env as unknown as {
-    EMAIL?: {
-      send(message: {
-        from: string;
-        to: string;
-        subject: string;
-        text: string;
-      }): Promise<unknown>;
-    };
-    AUTH_ORIGIN?: string;
-    GOOGLE_CLIENT_ID?: string;
-    GOOGLE_CLIENT_SECRET?: string;
-  };
 // A signed-in browser gets a session cookie; the sign-in page also remembers
 // which method was used last, in a plain cookie the page can read.
 async function establishSession(req: Request, email: string, method: 'email' | 'google') {
-  const id = crypto.randomUUID().replaceAll('-', ''),
+  const id = randomHex(16),
     token = random(),
     now = Date.now();
   const results = await db().batch([
@@ -39,7 +25,7 @@ async function establishSession(req: Request, email: string, method: 'email' | '
       .prepare(
         `INSERT INTO sessions(hash,account_id,created_at,expires_at) SELECT ?,id,?,? FROM accounts WHERE email=? AND deleted_at IS NULL RETURNING account_id`,
       )
-      .bind(await hash(token), now, now + 30 * DAY, email),
+      .bind(await sha256(token), now, now + 30 * DAY, email),
     db()
       .prepare('UPDATE accounts SET last_login_method=? WHERE email=? AND deleted_at IS NULL')
       .bind(method, email),
@@ -95,17 +81,16 @@ type Session = {
   email: string;
   created_at: number;
   handle: string | null;
-  balance_cents: number;
   last_login_method: string | null;
 };
 async function session(req: Request) {
   const token = cookie(req, 'session');
-  if (!/^[a-f0-9]{64}$/.test(token))
+  if (!HEX64.test(token))
     return fail(401, 'sign_in', 'Sign in to manage your account.');
   const row = await db()
-    .prepare(`SELECT a.id,a.email,s.created_at,a.handle,a.balance_cents,a.last_login_method FROM sessions s JOIN accounts a ON a.id=s.account_id
+    .prepare(`SELECT a.id,a.email,s.created_at,a.handle,a.last_login_method FROM sessions s JOIN accounts a ON a.id=s.account_id
     WHERE s.hash=? AND s.expires_at>? AND a.deleted_at IS NULL`)
-    .bind(await hash(token), Date.now())
+    .bind(await sha256(token), Date.now())
     .first<Session>();
   if (!row)
     return fail(401, 'sign_in', 'Your session has expired. Sign in again.');
@@ -125,13 +110,13 @@ export async function tokenOwner(tokenHash: string) {
 export async function accountRoutes(
   req: Request,
   path: string[],
-  limit: (scope: string, count: number, window?: number) => Promise<void>,
+  limit: Limit,
 ): Promise<Response | null> {
   if (!['auth', 'account'].includes(path[0])) return null;
   const route = path.join('/');
   const method = req.method;
   const origin = new URL(req.url).origin;
-  const canonical = settings().AUTH_ORIGIN || 'https://bilaga.link';
+  const canonical = env.AUTH_ORIGIN || 'https://bilaga.link';
   const local = ['http://localhost:3119', 'http://127.0.0.1:3119'].includes(
     origin,
   );
@@ -147,16 +132,16 @@ export async function accountRoutes(
       'cross_origin',
       'Account changes must come from this website.',
     );
+  const { EMAIL: mailer, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = env;
   if (route === 'auth/methods' && method === 'GET')
-    return json({ email: !!settings().EMAIL, google: !!(settings().GOOGLE_CLIENT_ID && settings().GOOGLE_CLIENT_SECRET) });
+    return json({ email: !!mailer, google: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) });
   // Google sign-in: authorization code with PKCE, state bound to this browser.
   // The id_token comes straight from Google's token endpoint over TLS with the
   // client secret, so its claims are trusted without a second signature check.
   if (route === 'auth/google' && method === 'GET') {
-    const { GOOGLE_CLIENT_ID } = settings();
-    if (!GOOGLE_CLIENT_ID || !settings().GOOGLE_CLIENT_SECRET)
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET)
       return fail(503, 'google_unavailable', 'Google sign-in is not configured.');
-    await limit(`login-ip:${await hash(req.headers.get('CF-Connecting-IP') || 'local')}`, 5);
+    await limit(`login-ip:${await clientHash(req)}`, 5);
     const state = random(),
       verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
     const challenge = base64url(
@@ -178,10 +163,9 @@ export async function accountRoutes(
     return response;
   }
   if (route === 'auth/google/callback' && method === 'GET') {
-    const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = settings();
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET)
       return fail(503, 'google_unavailable', 'Google sign-in is not configured.');
-    await limit(`verify:${await hash(req.headers.get('CF-Connecting-IP') || 'local')}`, 20);
+    await limit(`verify:${await clientHash(req)}`, 20);
     const params = new URL(req.url).searchParams;
     const [state, verifier] = cookie(req, 'oauth').split('.');
     const back = (message: string) =>
@@ -231,41 +215,32 @@ export async function accountRoutes(
     return response;
   }
   if (route === 'auth/request' && method === 'POST') {
-    if (!settings().EMAIL)
+    if (!mailer)
       return fail(
         503,
         'email_unavailable',
         'Email sign-in is not configured yet.',
       );
-    await limit(
-      `login-ip:${await hash(req.headers.get('CF-Connecting-IP') || 'local')}`,
-      5,
-    );
+    await limit(`login-ip:${await clientHash(req)}`, 5);
     const body = await bodyJson(req);
     const email =
       typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
-    if (
-      email.length > 254 ||
-      !EMAIL.test(
-        email,
-      )
-    )
+    if (email.length > 254 || !EMAIL.test(email))
       return fail(400, 'invalid_email', 'Enter a valid email address.');
-    await limit(`login-email:${await hash(email)}`, 1);
+    await limit(`login-email:${await sha256(email)}`, 1);
     await limit('login-global', 30);
     // Daily signup throttles: self-serve free accounts must not be mintable in bulk.
-    const ip = await hash(req.headers.get('CF-Connecting-IP') || 'local');
     const known = await db()
       .prepare('SELECT 1 FROM accounts WHERE email=? AND deleted_at IS NULL')
       .bind(email)
       .first();
     if (!known) {
-      await limit(`signup-ip-day:${ip}`, 5, DAY);
-      await limit(`signup-domain-day:${await hash(email.split('@')[1])}`, 50, DAY);
+      await limit(`signup-ip-day:${await clientHash(req)}`, 5, DAY);
+      await limit(`signup-domain-day:${await sha256(email.split('@')[1])}`, 50, DAY);
     }
     const token = random(),
       browser = random(),
-      tokenHash = await hash(token);
+      tokenHash = await sha256(token);
     await db().batch([
       db()
         .prepare('DELETE FROM login_links WHERE email=? OR expires_at<=?')
@@ -274,10 +249,10 @@ export async function accountRoutes(
         .prepare(
           'INSERT INTO login_links(hash,email,browser_hash,expires_at) VALUES(?,?,?,?)',
         )
-        .bind(tokenHash, email, await hash(browser), Date.now() + 15 * 60_000),
+        .bind(tokenHash, email, await sha256(browser), Date.now() + 15 * 60_000),
     ]);
     try {
-      await settings().EMAIL!.send({
+      await mailer.send({
         from: 'login@bilaga.link',
         to: email,
         subject: 'Sign in to Bilaga',
@@ -302,16 +277,10 @@ export async function accountRoutes(
     return response;
   }
   if (route === 'auth/verify' && method === 'POST') {
-    await limit(
-      `verify:${await hash(req.headers.get('CF-Connecting-IP') || 'local')}`,
-      20,
-    );
+    await limit(`verify:${await clientHash(req)}`, 20);
     const body = await bodyJson(req),
       browser = cookie(req, 'login');
-    if (
-      !/^[a-f0-9]{64}$/.test(body?.token || '') ||
-      !/^[a-f0-9]{64}$/.test(browser)
-    )
+    if (!HEX64.test(body?.token || '') || !HEX64.test(browser))
       return fail(
         400,
         'invalid_link',
@@ -322,7 +291,7 @@ export async function accountRoutes(
       .prepare(
         'DELETE FROM login_links WHERE hash=? AND browser_hash=? AND expires_at>? RETURNING email',
       )
-      .bind(await hash(body.token), await hash(browser), Date.now())
+      .bind(await sha256(body.token), await sha256(browser), Date.now())
       .first<{ email: string }>();
     if (!link)
       return fail(
@@ -346,7 +315,7 @@ export async function accountRoutes(
   if (route === 'auth/logout' && method === 'POST') {
     await db()
       .prepare('DELETE FROM sessions WHERE hash=?')
-      .bind(await hash(cookie(req, 'session')))
+      .bind(await sha256(cookie(req, 'session')))
       .run();
     const response = json({ signed_out: true });
     setCookie(req, response, 'session', '', 0);
@@ -398,7 +367,7 @@ export async function accountRoutes(
         'Name the agent using 1–60 characters.',
       );
     const token = `bilaga_${random()}`,
-      id = crypto.randomUUID().replaceAll('-', '');
+      id = randomHex(16);
     const row = await db()
       .prepare(`INSERT INTO api_tokens(id,account_id,hash,label,created_at) SELECT ?,?,?,?,?
       WHERE EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)
@@ -406,7 +375,7 @@ export async function accountRoutes(
       .bind(
         id,
         account.id,
-        await hash(token),
+        await sha256(token),
         label,
         Date.now(),
         account.id,
@@ -453,7 +422,7 @@ export async function accountRoutes(
     await db().batch([
       db()
         .prepare(
-          'UPDATE accounts SET email=NULL,deleted_at=?,uploads_enabled=0,last_login_method=NULL WHERE id=?',
+          'UPDATE accounts SET email=NULL,deleted_at=?,last_login_method=NULL WHERE id=?',
         )
         .bind(Date.now(), account.id),
       db().prepare('DELETE FROM sessions WHERE account_id=?').bind(account.id),

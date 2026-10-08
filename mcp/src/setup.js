@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { USER_AGENT } from './client.js';
 
 export function configDir() {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
@@ -43,7 +44,7 @@ export async function runSetup(argToken) {
   }
   const base = process.env.BILAGA_BASE ?? 'https://bilaga.link';
   const res = await fetch(`${base}/api/transfers`, {
-    headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'Bilaga-MCP/0.1', Accept: 'application/json' },
+    headers: { Authorization: `Bearer ${token}`, 'User-Agent': USER_AGENT, Accept: 'application/json' },
   });
   if (res.status === 401) {
     out.write('\nBilaga rejected that token (401). Check it and run setup again.\n');

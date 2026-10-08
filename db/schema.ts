@@ -75,7 +75,6 @@ export const accounts = sqliteTable('accounts', {
   email: text('email').unique(),
   createdAt: integer('created_at').notNull(),
   deletedAt: integer('deleted_at'),
-  uploadsEnabled: integer('uploads_enabled').notNull().default(0),
   handle: text('handle').unique(),
   balanceCents: integer('balance_cents').notNull().default(0),
   lastLoginMethod: text('last_login_method'),
@@ -166,12 +165,6 @@ export const ledger = sqliteTable(
   },
   (t) => [index('idx_ledger_account_created').on(t.accountId, t.createdAt)],
 );
-
-// Retained from the waitlist era; no longer written. Drop in a later migration once exported.
-export const waitlist = sqliteTable('waitlist', {
-  email: text('email').primaryKey(),
-  createdAt: integer('created_at').notNull(),
-});
 
 // Lots preserve purchase terms; allocations make upload refunds reversible.
 export const creditLots = sqliteTable('credit_lots', {

@@ -20,7 +20,7 @@ export async function creditSummary(accountId: string) {
   return { balance_cents: lots.reduce((sum, lot) => sum + lot.remaining_cents, 0), credit_lots: lots };
 }
 export async function remindExpiringCredits(limit = 25) {
-  const email = (env as unknown as { EMAIL?: { send(message: { from: string; to: string; subject: string; text: string }): Promise<unknown> } }).EMAIL;
+  const email = env.EMAIL;
   if (!email) return 0;
   let sent = 0;
   for (let i = 0; i < limit; i++) {

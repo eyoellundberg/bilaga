@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { bodyJson, fail, json } from './http';
-import { randomHex, sha256 } from './hash';
-import { EMAIL, MAX_BYTES, MAX_STORED_BYTES, PART_BYTES } from './rules';
+import { HEX32, HEX64, randomHex, sha256 } from './hash';
+import { EMAIL, MAX_BYTES, MAX_STORED_BYTES, PART_BYTES, iso, transferStatus } from './rules';
 import { CONTENT_HASH_ALGORITHM, signPayload } from './receipts';
 import { eventId } from './events';
 
@@ -13,7 +13,6 @@ export type FileRequest = {
   uploader_email: string | null; manifest: string | null;
 };
 const db = () => env.DB;
-const iso = (value: number | null) => value === null ? null : new Date(value).toISOString();
 const requestState = (r: FileRequest) => r.revoked_at ? 'revoked' : r.submitted_at ? 'submitted' : r.expires_at <= Date.now() ? 'expired' : 'open';
 function publicRequest(r: FileRequest) {
   return {
@@ -26,17 +25,16 @@ export function assertRequestOpen(r: FileRequest) {
   if (requestState(r) !== 'open') return fail(409, 'request_closed', 'This request no longer accepts changes.');
 }
 export async function authorizeDrop(req: Request, id: string) {
-  const token = req.headers.get('Authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
-  if (!/^[a-f0-9]{32}$/.test(id) || !token) return fail(404, 'not_found', 'Upload request not found.');
+  const token = req.headers.get('Authorization')?.match(/^Bearer (\S+)$/)?.[1] || '';
+  if (!HEX32.test(id) || !HEX64.test(token)) return fail(404, 'not_found', 'Upload request not found.');
   const r = await db().prepare(`SELECT r.* FROM file_requests r JOIN accounts a ON a.id=r.owner
-    WHERE r.id=? AND r.token_hash=? AND a.deleted_at IS NULL`).bind(id, await sha256(new TextEncoder().encode(token))).first<FileRequest>();
+    WHERE r.id=? AND r.token_hash=? AND a.deleted_at IS NULL`).bind(id, await sha256(token)).first<FileRequest>();
   if (!r || r.revoked_at) return fail(404, 'not_found', 'Upload request not found.');
   return r;
 }
 // The upload credential never exposes download links, account details or billing.
 export function dropTransfer(t: { id: string; filename: string; size: number; state: string; completed_at: number | null; expires_at: number }) {
-  return { id: t.id, filename: t.filename, size_bytes: t.size,
-    status: t.state === 'deleted' ? 'deleted' : t.expires_at <= Date.now() ? 'expired' : t.state,
+  return { id: t.id, filename: t.filename, size_bytes: t.size, status: transferStatus(t),
     completed_at: iso(t.completed_at), part_size_bytes: PART_BYTES };
 }
 export async function dropStatus(r: FileRequest) {
@@ -98,14 +96,14 @@ export async function requestRoutes(req: Request, path: string[], owner: string)
     const maxTotal = integer(body.max_total_bytes, 5_000_000_000, MAX_STORED_BYTES, 'max_total_bytes');
     const maxFile = integer(body.max_file_bytes, Math.min(maxTotal, MAX_BYTES), Math.min(maxTotal, MAX_BYTES), 'max_file_bytes');
     const lifetime = integer(body.expires_in_seconds, 7 * 86400, 30 * 86400, 'expires_in_seconds');
-    const id = crypto.randomUUID().replaceAll('-', '');
+    const id = randomHex(16);
     const token = randomHex(32);
     const now = Date.now();
     const result = await db().prepare(`INSERT INTO file_requests
       (id,owner,token_hash,title,description,reference,max_files,max_file_bytes,max_total_bytes,created_at,expires_at)
       SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM accounts WHERE id=? AND deleted_at IS NULL)
       AND (SELECT COUNT(*) FROM file_requests WHERE owner=? AND submitted_at IS NULL AND revoked_at IS NULL AND expires_at>?)<100 RETURNING *`)
-      .bind(id, owner, await sha256(new TextEncoder().encode(token)), title, description, reference, maxFiles, maxFile, maxTotal, now, now + lifetime * 1000, owner, owner, now).first<FileRequest>();
+      .bind(id, owner, await sha256(token), title, description, reference, maxFiles, maxFile, maxTotal, now, now + lifetime * 1000, owner, owner, now).first<FileRequest>();
     if (!result) return fail(429, 'request_limit', 'At most 100 open requests are allowed. Close an existing request first.');
     return json({ ...publicRequest(result), reference, upload_url: `${origin}/r/${id}#key=${token}` }, 201);
   }
@@ -113,7 +111,7 @@ export async function requestRoutes(req: Request, path: string[], owner: string)
     const before = new URL(req.url).searchParams.get('before');
     const [stamp, cursorId] = before?.split(':') ?? [String(Number.MAX_SAFE_INTEGER), ''];
     const cutoff = Number(stamp);
-    if (!Number.isSafeInteger(cutoff) || cutoff < 0 || (before !== null && !/^[a-f0-9]{32}$/.test(cursorId || '')))
+    if (!Number.isSafeInteger(cutoff) || cutoff < 0 || (before !== null && !HEX32.test(cursorId || '')))
       return fail(400, 'invalid_cursor', 'Use the next_before cursor returned by the previous page.');
     const rows = (await db().prepare(`SELECT * FROM file_requests WHERE owner=? AND
       (created_at<? OR (created_at=? AND id<?)) ORDER BY created_at DESC,id DESC LIMIT 50`)
@@ -122,7 +120,7 @@ export async function requestRoutes(req: Request, path: string[], owner: string)
     return json({ requests: rows.map(r => ({ ...publicRequest(r), reference: r.reference, created_at: iso(r.created_at) })),
       next_before: rows.length === 50 ? `${last.created_at}:${last.id}` : null });
   }
-  if (!/^[a-f0-9]{32}$/.test(path[1] || '')) return fail(404, 'not_found', 'Request not found.');
+  if (!HEX32.test(path[1] || '')) return fail(404, 'not_found', 'Request not found.');
   const r = await db().prepare('SELECT * FROM file_requests WHERE id=? AND owner=?').bind(path[1], owner).first<FileRequest>();
   if (!r) return fail(404, 'not_found', 'Request not found.');
   if (path.length === 2 && req.method === 'GET') {

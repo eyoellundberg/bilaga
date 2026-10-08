@@ -1,6 +1,6 @@
 // Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
 /* oxlint-disable next/no-html-link-for-pages */
-import { Brand } from '@/app/brand';
+import { Brand, SiteFooter } from '@/app/brand';
 import { ArrowUpRight } from 'lucide-react';
 export const metadata = {
   title: 'Bilaga MCP server',
@@ -102,12 +102,7 @@ export default function Mcp() {
           both are planned but not built. Use the local server for now.
         </p>
       </article>
-      <footer>
-        <span>bilaga / File delivery for agents.</span>
-        <a href="/docs">
-          Connect your agent <ArrowUpRight size={14} />
-        </a>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

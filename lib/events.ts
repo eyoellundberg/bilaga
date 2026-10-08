@@ -9,8 +9,8 @@ import { signPayload } from './receipts';
 // with the receipt key. Delivery is durable: rows stay pending until a 2xx arrives
 // or the retry schedule is exhausted, and both request tails and the scheduled
 // job drain the queue.
-export const EVENT_VERSION = 1;
-export const EVENT_RETENTION = 30 * DAY;
+const EVENT_VERSION = 1;
+const EVENT_RETENTION = 30 * DAY;
 const RETRY_DELAYS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3600_000, 12 * 3600_000];
 const db = () => env.DB;
 type EventRow = {
@@ -67,7 +67,7 @@ export async function recordEvent(
     .bind(id, accountId, type, JSON.stringify(payload), now, hook ? now : null)
     .run();
 }
-export async function signedEvent(row: EventRow) {
+async function signedEvent(row: EventRow) {
   const payload = JSON.parse(row.payload) as Record<string, unknown>;
   const signed = await signPayload('event', payload);
   return (
@@ -184,7 +184,7 @@ export function validateWebhookUrl(raw: unknown, apiOrigin: string) {
     return fail(400, 'invalid_url', 'Webhook URLs must use a public hostname, not an IP address.');
   return u.toString();
 }
-type Limit = (scope: string, count: number, window?: number) => Promise<void>;
+export type Limit = (scope: string, count: number, window?: number) => Promise<void>;
 // Routes under /api/webhook and /api/events. The caller has already authenticated
 // the bearer token; `owner` is the account id.
 export async function eventRoutes(

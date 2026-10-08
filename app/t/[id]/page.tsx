@@ -1,6 +1,6 @@
 // Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
 /* oxlint-disable next/no-html-link-for-pages */
-import { Brand } from '@/app/brand';
+import { Brand, SiteFooter } from '@/app/brand';
 import {
   Download,
   ArrowUpRight,
@@ -134,12 +134,7 @@ export default async function Recipient({
           </a>
         </section>
       )}
-      <footer>
-        <span>Delivered with Bilaga.</span>
-        <a href="/docs">
-          Connect your agent <ArrowUpRight size={14} />
-        </a>
-      </footer>
+      <SiteFooter note="Delivered with Bilaga." />
     </main>
   );
 }

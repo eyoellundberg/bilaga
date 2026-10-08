@@ -20,7 +20,7 @@ def completed_parts(tid):
                 if count:return count
             except sqlite3.OperationalError:pass
     return 0
-sql(f"INSERT INTO accounts(id,email,created_at,uploads_enabled) VALUES('{owner}','{email}',{int(time.time()*1000)},1)")
+sql(f"INSERT INTO accounts(id,email,created_at) VALUES('{owner}','{email}',{int(time.time()*1000)})")
 sql(f"INSERT INTO api_tokens(id,account_id,hash,label,created_at) VALUES('{secrets.token_hex(16)}','{owner}','{hashlib.sha256(token.encode()).hexdigest()}','Disposable restart test',{int(time.time()*1000)})")
 tid=None
 try:

@@ -1,7 +1,7 @@
 // Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
 /* oxlint-disable next/no-html-link-for-pages */
 import { ConnectAgent } from '@/app/connect-agent';
-import { Brand } from '@/app/brand';
+import { Brand, SiteFooter } from '@/app/brand';
 import { ArrowUpRight, Terminal } from 'lucide-react';
 import {
   CREDIT_VALIDITY_YEARS,
@@ -237,12 +237,7 @@ export default function Docs() {
           Read the complete agent instructions <ArrowUpRight size={16} />
         </a>
       </article>
-      <footer>
-        <span>bilaga / File delivery for agents.</span>
-        <a href="/">
-          Back to Bilaga <ArrowUpRight size={14} />
-        </a>
-      </footer>
+      <SiteFooter href="/" label="Back to Bilaga" />
     </main>
   );
 }

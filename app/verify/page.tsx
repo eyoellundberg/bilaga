@@ -1,6 +1,6 @@
 // Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
 /* oxlint-disable next/no-html-link-for-pages */
-import { Brand } from '@/app/brand';
+import { Brand, SiteFooter } from '@/app/brand';
 import { ArrowUpRight } from 'lucide-react';
 export const metadata = { title: 'Verifying Bilaga receipts and events' };
 const receiptFields: [string, string][] = [
@@ -160,12 +160,7 @@ export default function Verify() {
           documents whose <code>version</code> they do not understand.
         </p>
       </article>
-      <footer>
-        <span>bilaga / File delivery for agents.</span>
-        <a href="/docs">
-          Connect your agent <ArrowUpRight size={14} />
-        </a>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

@@ -1,3 +1,5 @@
+import { sha256 } from './hash';
+
 export const json = (data: unknown, status = 200) =>
   Response.json(data, {
     status,
@@ -59,6 +61,8 @@ export async function boundedBody(req: Request, limit: number) {
   }
   return data.subarray(0, total);
 }
+// Rate-limit scope for the caller's address; hashed so the key never stores an IP.
+export const clientHash = (req: Request) => sha256(req.headers.get('CF-Connecting-IP') || 'local');
 export async function bodyJson(req: Request) {
   try {
     return JSON.parse(new TextDecoder().decode(await boundedBody(req, 4096)));

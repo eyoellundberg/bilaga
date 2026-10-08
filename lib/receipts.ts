@@ -9,7 +9,6 @@ export const SIGNATURE_ALGORITHM = 'ed25519';
 export const CANONICALIZATION = 'json-sorted-keys-no-whitespace-utf8';
 
 type Jwk = JsonWebKey & { x: string; d?: string };
-const settings = () => env as unknown as { RECEIPT_SIGNING_KEY?: string };
 let cached: Promise<{ key: CryptoKey; publicKey: string; keyId: string } | null> | undefined;
 
 function base64urlToHex(value: string) {
@@ -21,7 +20,7 @@ function hexToBytes(hex: string) {
 }
 
 async function load() {
-  const raw = settings().RECEIPT_SIGNING_KEY;
+  const raw = env.RECEIPT_SIGNING_KEY;
   if (!raw) return null;
   let jwk: Jwk;
   try {

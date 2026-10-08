@@ -31,28 +31,24 @@ export const describePacks = () =>
   TOP_UP_PACKS.map((p) => `${p.name} is ${usd(p.amount_cents)} for ${usd(p.credit_cents)} of credit (up to ${p.up_to_gb} GB)`).join('; ') +
   `. Paid once, valid for ${CREDIT_VALIDITY_YEARS} years.`;
 export const EMAIL = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i;
-export const LIMITS = {
-  max_file_bytes: MAX_BYTES,
-  retention_ms: RETENTION,
-  max_stored_bytes: MAX_STORED_BYTES,
-  max_pending_uploads: MAX_PENDING_UPLOADS,
-  free_stored_bytes: FREE_STORED_BYTES,
-  free_transfers_per_30_days: FREE_MONTHLY_TRANSFERS,
-};
-export function describeLimits(l = LIMITS) {
+export function describeLimits() {
   return {
-    max_file_bytes: l.max_file_bytes,
-    max_stored_bytes: l.max_stored_bytes,
-    max_pending_uploads: l.max_pending_uploads,
-    free_stored_bytes: l.free_stored_bytes,
-    free_transfers_per_30_days: l.free_transfers_per_30_days,
-    retention_days: Math.round(l.retention_ms / DAY),
+    max_file_bytes: MAX_BYTES,
+    max_stored_bytes: MAX_STORED_BYTES,
+    max_pending_uploads: MAX_PENDING_UPLOADS,
+    free_stored_bytes: FREE_STORED_BYTES,
+    free_transfers_per_30_days: FREE_MONTHLY_TRANSFERS,
+    retention_days: Math.round(RETENTION / DAY),
     price_cents_per_gb: PRICE_CENTS_PER_GB,
     minimum_charge_cents: MINIMUM_CHARGE_CENTS,
     top_up_packs: TOP_UP_PACKS,
     credit_validity_years: CREDIT_VALIDITY_YEARS,
   };
 }
+export const iso = (ms: number | null) => (ms ? new Date(ms).toISOString() : null);
+// A transfer's public status: its state unless the link is dead.
+export const transferStatus = (t: { state: string; expires_at: number }) =>
+  t.state === 'deleted' ? 'deleted' : t.expires_at <= Date.now() ? 'expired' : t.state;
 // Priced transfers: the sender names a price in cents; Bilaga keeps a fee when
 // it settles. Balances are integer cents and never go negative.
 export const MAX_PRICE_CENTS = 1_000_000;

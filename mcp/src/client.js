@@ -7,7 +7,7 @@ import { basename, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 
 export const VERSION = createRequire(import.meta.url)('../package.json').version;
-const USER_AGENT = `Bilaga-MCP/${VERSION}`;
+export const USER_AGENT = `Bilaga-MCP/${VERSION}`;
 
 export class BilagaError extends Error {
   constructor(status, body) {
@@ -21,6 +21,15 @@ export class BilagaError extends Error {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Bilaga answers JSON; keep plain text (or an empty body) for the error message.
+async function parseBody(res) {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return text;
+  }
+}
 
 export class BilagaClient {
   constructor({ base = 'https://bilaga.link', token, fetch: fetchImpl = globalThis.fetch } = {}) {
@@ -61,13 +70,7 @@ export class BilagaClient {
         }
         throw err;
       }
-      const text = await res.text();
-      let parsed;
-      try {
-        parsed = text ? JSON.parse(text) : null;
-      } catch {
-        parsed = text;
-      }
+      const parsed = await parseBody(res);
       if (res.ok) return parsed;
       const retriable = res.status >= 500 || res.status === 429;
       if (retriable && attempt < attempts - 1) {
@@ -147,16 +150,7 @@ export class BilagaClient {
     const res = await this.fetch(`${this.base}/api/download/${encodeURIComponent(publicId)}`, {
       headers: { 'User-Agent': USER_AGENT, Authorization: `Bearer ${this.token}` },
     });
-    if (!res.ok) {
-      const text = await res.text();
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = text;
-      }
-      throw new BilagaError(res.status, parsed);
-    }
+    if (!res.ok) throw new BilagaError(res.status, await parseBody(res));
     let name;
     const disposition = res.headers.get('Content-Disposition') ?? '';
     const star = disposition.match(/filename\*=UTF-8''([^;]+)/);

@@ -1,11 +1,10 @@
 import { authorizeDrop, assertRequestOpen, dropStatus, dropTransfer, submitRequest, requestRoutes, type FileRequest } from './requests';
 import { creditSummary, expireCredits } from './credits';
-import { json, fail, ApiError, bodyJson, boundedBody } from './http';
+import { json, fail, ApiError, bodyJson, boundedBody, clientHash } from './http';
 import { accountRoutes, tokenOwner, cleanAccounts } from './accounts';
 import { recordEvent, eventRoutes, deliverPending, pruneEvents } from './events';
 import { stripeConfigured, verifyStripeSignature } from './stripe';
-export { json } from './http';
-import { sha256 } from './hash';
+import { HEX32, HEX64, randomHex, sha256 } from './hash';
 import { env } from 'cloudflare:workers';
 import {
   CURRENT_OFFER,
@@ -14,9 +13,13 @@ import {
   topUpPack,
   usd,
   MAX_BYTES,
+  MAX_STORED_BYTES,
+  MAX_PENDING_UPLOADS,
+  FREE_STORED_BYTES,
+  FREE_MONTHLY_TRANSFERS,
+  RETENTION,
   PART_BYTES,
   DAY,
-  LIMITS,
   EMAIL,
   MONTH,
   describeLimits,
@@ -24,10 +27,13 @@ import {
   validPrice,
   FEE_BPS,
   fileLabel,
+  gbLabel,
   quoteCents,
   validSize,
   cleanFilename,
   contentDisposition,
+  iso,
+  transferStatus,
 } from './rules';
 import {
   CONTENT_HASH_ALGORITHM,
@@ -88,24 +94,20 @@ type Part = {
 };
 // This is a per-isolate memory guard, not an account or persistent quota.
 let activeChunkRequests = 0;
-const bindings = () =>
-  env as unknown as {
-    DB: D1Database;
-    FILES: R2Bucket;
-    BILAGA_TOKEN_HASH?: string;
-  };
-const db = () => bindings().DB;
-const bucket = () => bindings().FILES;
+const db = () => env.DB;
+const bucket = () => env.FILES;
 const key = (t: Transfer) => `transfers/${t.id}`;
-const iso = (n: number | null) => (n ? new Date(n).toISOString() : null);
+// Re-read a row after a write; callers hold an id that exists.
+const reload = async (id: string) =>
+  (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(id).first<Transfer>())!;
 async function authorize(req: Request) {
   const token = req.headers
     .get('Authorization')
     ?.match(/^Bearer ([^\s]+)$/)?.[1];
   if (!token || token.length > 256)
     return fail(401, 'unauthorized', 'A valid Bilaga token is required.');
-  const actual = await sha256(new TextEncoder().encode(token));
-  const expected = bindings().BILAGA_TOKEN_HASH;
+  const actual = await sha256(token);
+  const expected = env.BILAGA_TOKEN_HASH;
   if (expected && actual === expected) return actual;
   const owner = await tokenOwner(actual);
   if (!owner)
@@ -149,7 +151,7 @@ async function settle(t: Transfer, payer: AccountIdentity) {
         `INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
          SELECT ?,?,?,COALESCE((SELECT balance_cents FROM accounts WHERE id=?),0),?,?,?,? WHERE ${guard}`,
       )
-      .bind(crypto.randomUUID().replaceAll('-', ''), account, delta, account, kind, t.id, note, now);
+      .bind(randomHex(16), account, delta, account, kind, t.id, note, now);
   const results = await db().batch([
     paidMark,
     db()
@@ -192,12 +194,7 @@ function publicData(t: Transfer) {
     price_cents: t.price_cents,
     paid: t.price_cents > 0 ? !!t.paid_at : null,
     expires_at: iso(t.expires_at),
-    status:
-      t.state === 'deleted'
-        ? 'deleted'
-        : t.expires_at <= Date.now()
-          ? 'expired'
-          : t.state,
+    status: transferStatus(t),
   };
 }
 function privateData(t: Transfer, origin: string) {
@@ -278,9 +275,8 @@ async function markReceived(t: Transfer, account: AccountIdentity, origin: strin
     .bind(Date.now(), account.id, t.id)
     .first();
   if (first) {
-    const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
     await recordEvent(t.owner, 'transfer.received', {
-      ...eventData(fresh, origin),
+      ...eventData(await reload(t.id), origin),
       received_by: account.handle,
     });
   }
@@ -298,7 +294,7 @@ async function refundIfUnfinished(t: Transfer) {
     db()
       .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
         SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'refund',?,?,? WHERE EXISTS(SELECT 1 FROM transfers WHERE id=? AND charged_cents>0 AND completed_at IS NULL)`)
-      .bind(crypto.randomUUID().replaceAll('-', ''), t.owner, t.charged_cents, t.owner, t.id, `Upload of ${t.filename} did not complete`, now, t.id),
+      .bind(randomHex(16), t.owner, t.charged_cents, t.owner, t.id, `Upload of ${t.filename} did not complete`, now, t.id),
     db().prepare(`UPDATE transfers SET charged_cents=0 WHERE id=? AND completed_at IS NULL`).bind(t.id),
   ]);
 }
@@ -368,7 +364,7 @@ export async function cleanup() {
   return removed;
 }
 export async function publicTransfer(id: string) {
-  if (!/^[a-f0-9]{32}$/.test(id)) return null;
+  if (!HEX32.test(id)) return null;
   const t = await db()
     .prepare('SELECT * FROM transfers WHERE public_id=?')
     .bind(id)
@@ -379,11 +375,12 @@ export async function publicTransfer(id: string) {
 // Receipts are kept indefinitely. After deletion the filename, sender label
 // and addressing are already redacted; the hash, sizes, handles and times remain.
 async function signedReceiptFor(t: Transfer) {
+  const status = transferStatus(t);
   return signReceipt({
     version: RECEIPT_VERSION,
     issuer: 'bilaga.link',
     transfer: t.public_id,
-    status: t.state === 'deleted' ? 'deleted' : t.expires_at <= Date.now() ? 'expired' : 'available',
+    status: status === 'complete' ? 'available' : status,
     filename: t.filename,
     size_bytes: t.size,
     part_size_bytes: PART_BYTES,
@@ -544,7 +541,7 @@ async function stripeWebhook(req: Request) {
   if (event?.type !== 'checkout.session.completed' || !session?.id) return json({ received: true, ignored: event?.type });
   const accountId = session.metadata?.account_id || '';
   const amount = session.amount_total ?? 0;
-  if (session.payment_status !== 'paid' || session.currency !== 'usd' || !/^[a-f0-9]{32}$/.test(accountId) || !Number.isInteger(amount) || amount <= 0)
+  if (session.payment_status !== 'paid' || session.currency !== 'usd' || !HEX32.test(accountId) || !Number.isInteger(amount) || amount <= 0)
     return json({ received: true, ignored: 'unpaid_or_malformed' });
   // Sessions from the current offer credit their pack; older sessions
   // retain their original dollar-for-dollar credit.
@@ -609,7 +606,7 @@ async function inboxRoutes(p: string[], method: string, owner: string, origin: s
       transfers: await Promise.all(rows.map((t) => inboxData(t, origin))),
     });
   }
-  if (p.length === 3 && /^[a-f0-9]{32}$/.test(p[1]) && p[2] === 'pay' && method === 'POST') {
+  if (p.length === 3 && HEX32.test(p[1]) && p[2] === 'pay' && method === 'POST') {
     await rateLimit(`pay:${me.id}`, 30);
     const t = await db()
       .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
@@ -630,23 +627,21 @@ async function inboxRoutes(p: string[], method: string, owner: string, origin: s
         return fail(402, 'insufficient_balance', `Your balance is ${balance?.balance_cents ?? 0} cents; this transfer costs ${t.price_cents}.`);
       if (!(await settle(t, me)))
         return fail(409, 'payment_conflict', 'The transfer was paid or changed concurrently. Check the inbox again.');
-      const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
+      const fresh = await reload(t.id);
       await recordEvent(t.owner, 'transfer.paid', { ...eventData(fresh, origin), paid_by: me.handle, net_cents: t.price_cents - feeCents(t.price_cents) });
       await recordEvent(me.id, 'transfer.paid', { ...(await inboxData(fresh, origin)), paid_by: me.handle });
       await markReceived(fresh, me, origin);
     }
-    const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
-    return json(await inboxData(fresh, origin));
+    return json(await inboxData(await reload(t.id), origin));
   }
-  if (p.length === 3 && /^[a-f0-9]{32}$/.test(p[1]) && p[2] === 'received' && method === 'POST') {
+  if (p.length === 3 && HEX32.test(p[1]) && p[2] === 'received' && method === 'POST') {
     const t = await db()
       .prepare("SELECT * FROM transfers WHERE public_id=? AND recipient=? AND state='complete'")
       .bind(p[1], me.email)
       .first<Transfer>();
     if (!t) return fail(404, 'not_found', 'No transfer addressed to you has that id.');
     await markReceived(t, me, origin);
-    const fresh = (await db().prepare('SELECT * FROM transfers WHERE id=?').bind(t.id).first<Transfer>())!;
-    return json(await inboxData(fresh, origin));
+    return json(await inboxData(await reload(t.id), origin));
   }
   return fail(404, 'not_found', 'Endpoint not found.');
 }
@@ -668,13 +663,7 @@ async function createTransfer(req: Request, owner: string, guest: FileRequest | 
     body.to = requester.email;
   }
   if (!validSize(body.size_bytes))
-    return fail(
-      400,
-      'invalid_size',
-      'Files must be between 1 byte and 50 GB.',
-    );
-  if (body.size_bytes > LIMITS.max_file_bytes)
-    return fail(413, 'too_large', `Files can be at most ${fileLabel(LIMITS.max_file_bytes)}.`);
+    return fail(400, 'invalid_size', `Files must be between 1 byte and ${gbLabel(MAX_BYTES)}.`);
   let filename: string;
   try {
     filename = cleanFilename(body.filename);
@@ -701,7 +690,7 @@ async function createTransfer(req: Request, owner: string, guest: FileRequest | 
     recipient = to;
   }
   if (body.in_reply_to !== undefined && body.in_reply_to !== null) {
-    if (typeof body.in_reply_to !== 'string' || !/^[a-f0-9]{32}$/.test(body.in_reply_to))
+    if (typeof body.in_reply_to !== 'string' || !HEX32.test(body.in_reply_to))
       return fail(400, 'invalid_reply', 'in_reply_to must be a transfer public id.');
     const me = await accountIdentity(owner);
     const original = me?.email
@@ -732,8 +721,8 @@ async function createTransfer(req: Request, owner: string, guest: FileRequest | 
   }
   // Only the purge runs inline; webhooks and pruning stay on the scheduled job.
   await purgeExpired().catch(() => console.error('Inline purge failed'));
-  const id = crypto.randomUUID().replaceAll('-', ''),
-    publicId = crypto.randomUUID().replaceAll('-', ''),
+  const id = randomHex(16),
+    publicId = randomHex(16),
     now = Date.now();
   // Free allowance or a charge from the balance. The owner test token is
   // never charged; accounts pay the storage price once they are past the
@@ -749,15 +738,15 @@ async function createTransfer(req: Request, owner: string, guest: FileRequest | 
       .bind(owner, now - MONTH, owner, owner)
       .first<{ monthly: number; stored: number; balance: number }>();
     const withinFree =
-      (usage?.monthly ?? 0) < LIMITS.free_transfers_per_30_days &&
-      (usage?.stored ?? 0) + body.size_bytes <= LIMITS.free_stored_bytes;
+      (usage?.monthly ?? 0) < FREE_MONTHLY_TRANSFERS &&
+      (usage?.stored ?? 0) + body.size_bytes <= FREE_STORED_BYTES;
     if (!withinFree) {
       charge = quoteCents(body.size_bytes);
       if ((usage?.balance ?? 0) < charge)
         return fail(
           402,
           'insufficient_balance',
-          guest ? 'The requester needs to add credit before this file can be uploaded. Please contact them.' : `This transfer is outside your free allowance (${fileLabel(LIMITS.free_stored_bytes)} stored, ${LIMITS.free_transfers_per_30_days} transfers per 30 days) and costs ${(charge / 100).toFixed(2)} USD. Your balance is ${((usage?.balance ?? 0) / 100).toFixed(2)} USD. Add credit at ${origin}/account.`,
+          guest ? 'The requester needs to add credit before this file can be uploaded. Please contact them.' : `This transfer is outside your free allowance (${fileLabel(FREE_STORED_BYTES)} stored, ${FREE_MONTHLY_TRANSFERS} transfers per 30 days) and costs ${(charge / 100).toFixed(2)} USD. Your balance is ${((usage?.balance ?? 0) / 100).toFixed(2)} USD. Add credit at ${origin}/account.`,
         );
     }
   }
@@ -783,10 +772,10 @@ async function createTransfer(req: Request, owner: string, guest: FileRequest | 
         now, now + DAY, guest?.id ?? null,
         guest?.id ?? null, guest?.id ?? null, owner, now, body.size_bytes, body.size_bytes,
         owner, owner, charge,
-        owner, charge, owner, now - MONTH, LIMITS.free_transfers_per_30_days,
-        owner, body.size_bytes, LIMITS.free_stored_bytes,
-        owner, LIMITS.max_pending_uploads,
-        owner, body.size_bytes, LIMITS.max_stored_bytes,
+        owner, charge, owner, now - MONTH, FREE_MONTHLY_TRANSFERS,
+        owner, body.size_bytes, FREE_STORED_BYTES,
+        owner, MAX_PENDING_UPLOADS,
+        owner, body.size_bytes, MAX_STORED_BYTES,
       ),
     db()
       .prepare(`UPDATE accounts SET balance_cents=balance_cents-? WHERE id=? AND ?>0 AND EXISTS(SELECT 1 FROM transfers WHERE id=?)`)
@@ -794,13 +783,13 @@ async function createTransfer(req: Request, owner: string, guest: FileRequest | 
     db()
       .prepare(`INSERT INTO ledger (id,account_id,delta_cents,balance_after,kind,transfer_id,note,created_at)
         SELECT ?,?,?,(SELECT balance_cents FROM accounts WHERE id=?),'charge',?,?,? WHERE ?>0 AND EXISTS(SELECT 1 FROM transfers WHERE id=?)`)
-      .bind(crypto.randomUUID().replaceAll('-', ''), owner, -charge, owner, id, `Transfer of ${filename} (${fileLabel(body.size_bytes)})`, now, charge, id),
+      .bind(randomHex(16), owner, -charge, owner, id, `Transfer of ${filename} (${fileLabel(body.size_bytes)})`, now, charge, id),
   ]);
   if (!results[0].results.length)
     return fail(
       429,
       'account_limit',
-      guest ? 'The request is closed or its file, size, or account allowance has been reached. Contact the requester.' : `Limit reached: ${LIMITS.max_pending_uploads} unfinished upload${LIMITS.max_pending_uploads === 1 ? '' : 's'}, ${fileLabel(LIMITS.max_stored_bytes)} reserved storage, or an insufficient balance.`,
+      guest ? 'The request is closed or its file, size, or account allowance has been reached. Contact the requester.' : `Limit reached: ${MAX_PENDING_UPLOADS} unfinished uploads, ${fileLabel(MAX_STORED_BYTES)} reserved storage, or an insufficient balance.`,
     );
   let multi: R2MultipartUpload | undefined;
   try {
@@ -956,7 +945,7 @@ async function completeTransfer(t: Transfer, owner: string, guest: FileRequest |
       AND (request_id IS NULL OR EXISTS(SELECT 1 FROM file_requests r JOIN accounts a ON a.id=r.owner
         WHERE r.id=transfers.request_id AND r.submitted_at IS NULL AND r.revoked_at IS NULL AND r.expires_at>? AND a.deleted_at IS NULL))`,
     )
-    .bind(now, now + LIMITS.retention_ms, digest, t.id, now, now)
+    .bind(now, now + RETENTION, digest, t.id, now, now)
     .run();
   t = await owned(t.id, owner);
   // Deletion can race completion; never revive a revoked transfer or keep its bytes.
@@ -1037,22 +1026,18 @@ export async function handleApi(req: Request) {
         auth: 'magic_link_and_bearer_token',
         signals: 'polling_events_webhooks',
         addressing: 'email',
-        uploads_configured: !!bindings().BILAGA_TOKEN_HASH,
+        uploads_configured: !!env.BILAGA_TOKEN_HASH,
       });
     if (p.length === 1 && p[0] === 'quote' && method === 'GET') {
       const bytes = Number(u.searchParams.get('bytes'));
-      if (!Number.isSafeInteger(bytes) || bytes <= 0 || bytes > 50e9)
-        return fail(
-          400,
-          'invalid_size',
-          'Quote a file between 1 byte and 50 GB.',
-        );
+      if (!validSize(bytes))
+        return fail(400, 'invalid_size', `Quote a file between 1 byte and ${gbLabel(MAX_BYTES)}.`);
       return json({
         size_bytes: bytes,
         estimated_price_usd: quoteCents(bytes) / 100,
         currency: 'USD',
         charged_usd_outside_free_allowance: quoteCents(bytes) / 100,
-        upload_allowed: bytes <= MAX_BYTES,
+        upload_allowed: true,
         max_file_bytes: MAX_BYTES,
         billing: 'free_allowance_then_balance',
       });
@@ -1070,30 +1055,20 @@ export async function handleApi(req: Request) {
     }
     if (p.length === 1 && p[0] === 'receipts' && method === 'GET') {
       const hash = u.searchParams.get('hash') || '';
-      if (!/^[a-f0-9]{64}$/.test(hash))
+      if (!HEX64.test(hash))
         return fail(400, 'invalid_hash', 'Pass ?hash= as the 64-hex bilaga-chunked-sha256-8mib content hash.');
-      await rateLimit(`receipt-lookup:${await sha256(new TextEncoder().encode(req.headers.get('CF-Connecting-IP') || 'local'))}`, 60);
+      await rateLimit(`receipt-lookup:${await clientHash(req)}`, 60);
       return await receiptsByHash(hash);
     }
-    if (
-      p.length === 2 &&
-      p[0] === 'receipts' &&
-      /^[a-f0-9]{32}$/.test(p[1] || '') &&
-      method === 'GET'
-    ) {
+    if (p.length === 2 && p[0] === 'receipts' && HEX32.test(p[1]) && method === 'GET') {
       await rateLimit(`receipt:${p[1]}`, 60);
       return await receipt(p[1]);
     }
-    if (
-      p.length === 2 &&
-      p[0] === 'download' &&
-      /^[a-f0-9]{32}$/.test(p[1] || '') &&
-      (method === 'GET' || method === 'HEAD')
-    )
+    if (p.length === 2 && p[0] === 'download' && HEX32.test(p[1]) && ['GET', 'HEAD'].includes(method))
       return await download(req, p[1]);
     let guest: FileRequest | null = null;
     if (p[0] === 'drop') {
-      await rateLimit(`drop-ip:${await sha256(new TextEncoder().encode(req.headers.get('CF-Connecting-IP') || 'local'))}`, 600);
+      await rateLimit(`drop-ip:${await clientHash(req)}`, 600);
       guest = await authorizeDrop(req, p[1] || '');
       await rateLimit(`drop:${guest.id}`, 300);
       if (p.length === 2 && method === 'GET') return await dropStatus(guest);
@@ -1120,7 +1095,7 @@ export async function handleApi(req: Request) {
     }
     // The operator can grant credit by email.
     if (p.length === 1 && p[0] === 'credits' && method === 'POST') {
-      if (owner !== bindings().BILAGA_TOKEN_HASH)
+      if (owner !== env.BILAGA_TOKEN_HASH)
         return fail(403, 'forbidden', 'Owner access required.');
       const body = await bodyJson(req);
       const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
@@ -1133,7 +1108,7 @@ export async function handleApi(req: Request) {
           .bind(cents, email),
         db().prepare(`INSERT INTO ledger(id,account_id,delta_cents,balance_after,kind,note,created_at)
           SELECT ?,id,?,balance_cents,'grant',?,? FROM accounts WHERE email=? AND deleted_at IS NULL`)
-          .bind(crypto.randomUUID(), cents, typeof body.note === 'string' ? body.note.slice(0,120) : null, now, email),
+          .bind(randomHex(16), cents, typeof body.note === 'string' ? body.note.slice(0,120) : null, now, email),
       ]);
       const account = results[0].results[0] as { id: string; balance_cents: number; handle: string } | undefined;
       if (!account) return fail(404, 'not_found', 'No account has that email.');
@@ -1143,7 +1118,7 @@ export async function handleApi(req: Request) {
       return await balance(owner);
     }
     if (p.length === 1 && p[0] === 'cleanup' && method === 'POST') {
-      if (owner !== bindings().BILAGA_TOKEN_HASH)
+      if (owner !== env.BILAGA_TOKEN_HASH)
         return fail(403, 'forbidden', 'Owner access required.');
       return json({ removed: await cleanup() });
     }
@@ -1164,7 +1139,7 @@ export async function handleApi(req: Request) {
       ).results;
       return json({ transfers: rows.map((t) => privateData(t, u.origin)) });
     }
-    if (!/^[a-f0-9]{32}$/.test(p[1] || ''))
+    if (!HEX32.test(p[1] || ''))
       return fail(404, 'not_found', 'Transfer not found.');
     const t = await owned(p[1], owner);
     if (guest && t.request_id !== guest.id) return fail(404, 'not_found', 'File not found in this request.');

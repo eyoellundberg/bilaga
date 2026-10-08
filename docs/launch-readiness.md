@@ -1,6 +1,12 @@
+# Schema cleanup — local, not deployed (8 October 2026)
+
+Migration `0011_drop_waitlist.sql` drops the `waitlist` table (unused since the homepage replaced the waitlist) and the ignored `accounts.uploads_enabled` column; `lib/accounts.ts` no longer writes it. Plain `DROP TABLE` / `DROP COLUMN`, so `d1 migrations apply --remote` works. Export the waitlist rows first if anyone still wants them, and deploy the Worker together with the migration: the previous Worker's account-deletion UPDATE references the dropped column.
+
 # Brand refresh and Product Hunt launch prep — deployed 17 September 2026
 
 Worker version 8bc35729 (preceded the same day by 14ebef59). No migrations. Product Hunt launch is scheduled for 18 September 2026 (GPT-6 Astra Challenge), publishing 12:01 AM Pacific.
+
+**Product Hunt submission: done (17 September 2026, reported by Eyoel).** Tagline, description, shoutouts (OpenAI Codex, Cloudflare, Claude), gallery and the maker's first comment are in and the launch is scheduled. Remaining for launch day: reply to comments, share the launch, and keep the screenshot transfer below alive.
 
 - Brand: binder-clip logo (`public/logo.svg`, `BrandMark` in `app/brand.tsx`, new favicon), palette #024C17 / #ADEBB0 replacing the blues in `app/globals.css`, Faculty Glyphic headlines and Geist body text self-hosted through `@fontsource` packages (CSP `font-src 'self'` unchanged).
 - Tagline is now "File transfers for agents" everywhere (was "by agents"): home, metadata, JSON-LD, llms.txt, README, bilaga.md.

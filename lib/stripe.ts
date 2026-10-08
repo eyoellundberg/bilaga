@@ -5,16 +5,13 @@ import { CREDIT_VALIDITY_YEARS, CURRENT_OFFER, choosePackMessage, topUpPack, usd
 
 // Stripe Checkout without the SDK: two REST calls and one HMAC. The secret key
 // creates sessions; the webhook secret authenticates Stripe's callback.
-const settings = () =>
-  env as unknown as { STRIPE_SECRET_KEY?: string; STRIPE_WEBHOOK_SECRET?: string };
 export const stripeConfigured = () =>
-  !!(settings().STRIPE_SECRET_KEY && settings().STRIPE_WEBHOOK_SECRET);
+  !!(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
 
 export async function createCheckout(accountId: string, amountCents: number, origin: string) {
   const pack = topUpPack(amountCents);
   if (!pack) return fail(400, 'invalid_amount', choosePackMessage());
-  const key = settings().STRIPE_SECRET_KEY;
-  if (!key || !settings().STRIPE_WEBHOOK_SECRET)
+  if (!stripeConfigured())
     return fail(503, 'payments_unavailable', 'Card top-ups are not configured.');
   const form = new URLSearchParams({
     mode: 'payment',
@@ -32,7 +29,7 @@ export async function createCheckout(accountId: string, amountCents: number, ori
   const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${key}`,
+      Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
       'Content-Type': 'application/x-www-form-urlencoded',
       'Idempotency-Key': crypto.randomUUID(),
     },
@@ -47,5 +44,5 @@ export async function createCheckout(accountId: string, amountCents: number, ori
   return { id: data.id!, url: data.url };
 }
 export function verifyStripeSignature(header: string | null, body: string) {
-  return verifySignature(settings().STRIPE_WEBHOOK_SECRET, header, body);
+  return verifySignature(env.STRIPE_WEBHOOK_SECRET, header, body);
 }

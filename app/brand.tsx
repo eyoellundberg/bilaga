@@ -1,5 +1,6 @@
 // Full document navigation keeps per-response CSP nonces consistent; file links must stay native.
 /* oxlint-disable next/no-html-link-for-pages */
+import { ArrowUpRight } from 'lucide-react';
 export function BrandMark({ size = 27 }: { size?: number }) {
   return (
     <svg
@@ -26,5 +27,20 @@ export function Brand() {
       <BrandMark />
       bilaga<span className="brand-dot">.</span>
     </a>
+  );
+}
+
+export function SiteFooter({
+  note = 'bilaga / File delivery for agents.',
+  href = '/docs',
+  label = 'Connect your agent',
+}: { note?: string; href?: string; label?: string }) {
+  return (
+    <footer>
+      <span>{note}</span>
+      <a href={href}>
+        {label} <ArrowUpRight size={14} />
+      </a>
+    </footer>
   );
 }

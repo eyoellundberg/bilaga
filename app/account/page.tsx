@@ -1,5 +1,5 @@
 'use client';
-import { gbLabel, type describeLimits } from '@/lib/rules';
+import { describePacks, gbLabel, packLabel, type describeLimits } from '@/lib/rules';
 /* oxlint-disable next/no-html-link-for-pages */
 import { Fragment, useEffect, useState } from 'react';
 import { Brand } from '../brand';
@@ -213,7 +213,7 @@ export default function AccountPage() {
               <h2>Balance</h2>
               <p>
                 <strong>${(account.balance_cents / 100).toFixed(2)}</strong> in credit.
-                {` ${account.limits.top_up_packs.map((p) => `${p.name} is $${p.amount_cents / 100} for $${p.credit_cents / 100} of credit (up to ${p.up_to_gb} GB)`).join('; ')}. Paid once, valid for ${account.limits.credit_validity_years} years, never a subscription.`}
+                {` ${describePacks()} Never a subscription.`}
               </p>
               {account.credit_lots.length > 0 && (
                 <ul className="small">
@@ -242,7 +242,7 @@ export default function AccountPage() {
                         })
                       }
                     >
-                      {`${pack.name} · $${pack.amount_cents / 100}`}
+                      {packLabel(pack)}
                     </button>
                   ))}
                 </p>
