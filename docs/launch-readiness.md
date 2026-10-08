@@ -1,10 +1,12 @@
-# Schema cleanup — local, not deployed (8 October 2026)
+# Schema cleanup — deployed 8 October 2026
 
-Migration `0011_drop_waitlist.sql` drops the `waitlist` table (unused since the homepage replaced the waitlist) and the ignored `accounts.uploads_enabled` column; `lib/accounts.ts` no longer writes it. Plain `DROP TABLE` / `DROP COLUMN`, so `d1 migrations apply --remote` works. Export the waitlist rows first if anyone still wants them, and deploy the Worker together with the migration: the previous Worker's account-deletion UPDATE references the dropped column.
+Worker version 7ffbae9b (commit 0b6e3ba, documented in 690769b), then migration `0011_drop_waitlist.sql` applied with `d1 migrations apply --remote`. The Worker went first because the new code no longer references `waitlist` or `accounts.uploads_enabled`, so the old Worker never ran against the dropped column. Production `waitlist` had 0 rows, so nothing needed exporting. Verified live: `d1_migrations` ends at 0011, `waitlist` is gone, `accounts` has no `uploads_enabled` column; /, /account, /docs, /mcp, /verify, /terms, /privacy, /llms.txt and /api/config return 200, `/api/account` without a session returns 401 and `POST /` returns 405. Before deploying, all local suites passed on a freshly restarted built Worker with 0011 applied locally: integration 43, security, requests 94, accounts 38, network 82, credit-lots, interrupted-upload, scheduled, plus lint, typecheck, test:client, test:billing and the MCP tests.
+
+Original note: Migration `0011_drop_waitlist.sql` drops the `waitlist` table (unused since the homepage replaced the waitlist) and the ignored `accounts.uploads_enabled` column; `lib/accounts.ts` no longer writes it. Plain `DROP TABLE` / `DROP COLUMN`, so `d1 migrations apply --remote` works. Export the waitlist rows first if anyone still wants them, and deploy the Worker together with the migration: the previous Worker's account-deletion UPDATE references the dropped column.
 
 # Code review fixes and Product Hunt badge removal — deployed 8 October 2026
 
-Worker version 649fef3d (commits 660f3f4 and 967addc). No migrations. The schema cleanup above (0b6e3ba, migration 0011) came after this deploy and is not in it.
+Worker version 649fef3d (commits 660f3f4 and 967addc). No migrations. The schema cleanup above (0b6e3ba, migration 0011) shipped separately the same day as Worker 7ffbae9b.
 
 - Product Hunt badge removed from the home page, with its CSS and the `api.producthunt.com` CSP `img-src` entry.
 - Billing: deleted transfers that had completed now count toward the monthly free allowance (deleting no longer resets it). Paying for your own transfer is rejected (`own_transfer`), so purchased credit can't become non-expiring sale credit.
